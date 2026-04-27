@@ -44,7 +44,7 @@ def _run_email_confirmation(order: CreatedOrder) -> DownstreamResult:
     payload = {
         "order_id": order.order_id,
         "user_id": order.user_id,
-        "email": str(order.email),
+        "email": str(order.email), 
         "items": [item.model_dump() for item in order.items],
     }
 
