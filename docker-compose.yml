@@ -1,0 +1,32 @@
+services:
+  email-service:
+    build:
+      context: ./email-service
+    container_name: email-service
+    ports:
+      - "8001:8001"
+
+  inventory-service:
+    build:
+      context: ./inventory-service
+    container_name: inventory-service
+    ports:
+      - "8002:8002"
+
+  order-service:
+    build:
+      context: ./order-service
+    container_name: order-service
+    depends_on:
+      - email-service
+      - inventory-service
+    environment:
+      EMAIL_SERVICE_URL: http://email-service:8001
+      INVENTORY_SERVICE_URL: http://inventory-service:8002
+      DOWNSTREAM_MAX_RETRIES: "4"
+      DOWNSTREAM_INITIAL_BACKOFF_SECONDS: "0.1"
+      DOWNSTREAM_BACKOFF_MULTIPLIER: "2.0"
+      DOWNSTREAM_MAX_BACKOFF_SECONDS: "2.0"
+      DOWNSTREAM_REQUEST_TIMEOUT_SECONDS: "2.0"
+    ports:
+      - "8000:8000"

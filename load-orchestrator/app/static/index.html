@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Load Orchestrator</title>
+    <style>
+      :root {
+        --bg: #0b1020;
+        --bg2: #131a33;
+        --card: #18213f;
+        --text: #e8ecff;
+        --muted: #a9b2d6;
+        --accent: #4dd0e1;
+        --danger: #ff7a7a;
+        --ok: #6ee7a2;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: radial-gradient(circle at 20% 0%, #202d5a 0%, var(--bg) 55%);
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      h1 { margin: 0 0 10px; }
+      p { color: var(--muted); }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 12px;
+      }
+      .card {
+        background: linear-gradient(180deg, var(--card), var(--bg2));
+        border: 1px solid #2f3b66;
+        border-radius: 12px;
+        padding: 14px;
+      }
+      label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+      input, select {
+        width: 100%;
+        border-radius: 8px;
+        border: 1px solid #3a4978;
+        background: #0e1630;
+        color: var(--text);
+        padding: 10px;
+      }
+      .actions { display: flex; gap: 10px; margin-top: 14px; }
+      button {
+        border: none;
+        border-radius: 8px;
+        padding: 10px 14px;
+        color: #04101b;
+        background: var(--accent);
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button.secondary { background: #7183c5; color: #fff; }
+      .run-list { margin-top: 18px; }
+      .run-item { margin-bottom: 12px; }
+      .status-running { color: var(--accent); }
+      .status-succeeded { color: var(--ok); }
+      .status-failed, .status-stopped { color: var(--danger); }
+      pre {
+        max-height: 220px;
+        overflow: auto;
+        white-space: pre-wrap;
+        background: #0a122a;
+        border: 1px solid #2c3a64;
+        border-radius: 8px;
+        padding: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Cluster Load Orchestrator</h1>
+      <p>Run in-cluster load tests against Order Service and optionally inject outage chaos.</p>
+
+      <div class="card">
+        <div class="grid">
+          <div>
+            <label>Total Requests</label>
+            <input id="total_requests" type="number" value="2000" min="1" />
+          </div>
+          <div>
+            <label>VUs</label>
+            <input id="vus" type="number" value="100" min="1" />
+          </div>
+          <div>
+            <label>Max Duration</label>
+            <input id="max_duration" type="text" value="2m" />
+          </div>
+          <div>
+            <label>Unique Users</label>
+            <input id="unique_users" type="number" value="1000" min="1" />
+          </div>
+          <div>
+            <label>Order Base URL</label>
+            <input id="order_base_url" type="text" value="http://order-service.kafka-lab.svc.cluster.local:8000" />
+          </div>
+          <div>
+            <label>Chaos Enabled</label>
+            <select id="chaos_enabled">
+              <option value="false" selected>false</option>
+              <option value="true">true</option>
+            </select>
+          </div>
+          <div>
+            <label>Chaos Target</label>
+            <select id="target_service">
+              <option value="email-service">email-service</option>
+              <option value="inventory-service">inventory-service</option>
+            </select>
+          </div>
+          <div>
+            <label>Outage Seconds</label>
+            <input id="outage_seconds" type="number" value="60" min="5" />
+          </div>
+          <div>
+            <label>Recovery Replicas</label>
+            <input id="recovery_replicas" type="number" value="2" min="1" />
+          </div>
+        </div>
+        <div class="actions">
+          <button onclick="startRun()">Start Run</button>
+          <button class="secondary" onclick="refreshRuns()">Refresh</button>
+        </div>
+      </div>
+
+      <div class="run-list" id="runs"></div>
+    </div>
+
+    <script>
+      async function api(path, options = {}) {
+        const res = await fetch(`/api${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...options,
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(text || `Request failed: ${res.status}`);
+        }
+        return res.json();
+      }
+
+      function collectPayload() {
+        return {
+          total_requests: Number(document.getElementById("total_requests").value),
+          vus: Number(document.getElementById("vus").value),
+          max_duration: document.getElementById("max_duration").value,
+          unique_users: Number(document.getElementById("unique_users").value),
+          order_base_url: document.getElementById("order_base_url").value,
+          chaos: {
+            enabled: document.getElementById("chaos_enabled").value === "true",
+            target_service: document.getElementById("target_service").value,
+            outage_seconds: Number(document.getElementById("outage_seconds").value),
+            recovery_replicas: Number(document.getElementById("recovery_replicas").value),
+          },
+        };
+      }
+
+      async function startRun() {
+        try {
+          await api("/runs", {
+            method: "POST",
+            body: JSON.stringify(collectPayload()),
+          });
+          await refreshRuns();
+        } catch (err) {
+          alert(`Failed to start run: ${err.message}`);
+        }
+      }
+
+      async function stopRun(runId) {
+        try {
+          await api(`/runs/${runId}`, { method: "DELETE" });
+          await refreshRuns();
+        } catch (err) {
+          alert(`Failed to stop run: ${err.message}`);
+        }
+      }
+
+      async function refreshRuns() {
+        const runsEl = document.getElementById("runs");
+        runsEl.innerHTML = "Loading...";
+        try {
+          const data = await api("/runs");
+          const runs = data.runs || [];
+          if (!runs.length) {
+            runsEl.innerHTML = "<p>No runs yet.</p>";
+            return;
+          }
+
+          const details = await Promise.all(runs.map((run) => api(`/runs/${run.run_id}`)));
+          runsEl.innerHTML = details
+            .map((d) => {
+              const status = d.run.status;
+              const log = d.last_log_excerpt || "No logs yet";
+              return `
+                <div class="card run-item">
+                  <h3>${d.run.job_name}</h3>
+                  <p>Run ID: ${d.run.run_id}</p>
+                  <p>Status: <span class="status-${status}">${status}</span></p>
+                  <p>Active: ${d.active}</p>
+                  <p>Succeeded: ${d.succeeded ?? "n/a"} | Failed: ${d.failed ?? "n/a"}</p>
+                  <div class="actions">
+                    <button class="secondary" onclick="stopRun('${d.run.run_id}')">Stop Run</button>
+                  </div>
+                  <pre>${log}</pre>
+                </div>
+              `;
+            })
+            .join("");
+        } catch (err) {
+          runsEl.innerHTML = `<p>Failed to load runs: ${err.message}</p>`;
+        }
+      }
+
+      refreshRuns();
+      setInterval(refreshRuns, 8000);
+    </script>
+  </body>
+</html>

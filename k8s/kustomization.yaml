@@ -1,0 +1,8 @@
+resources:
+  - namespace.yaml
+  - order-service.yaml
+  - email-service.yaml
+  - inventory-service.yaml
+  - load-orchestrator.yaml
+  - observability.yaml
+  - hpa.yaml
