@@ -4,8 +4,18 @@ from datetime import UTC, datetime
 from time import sleep
 from uuid import uuid4
 
+from prometheus_client import Counter
+
 from app.clients import email_client, inventory_client
+from app.messaging import kafka_enabled, publish_order_created
 from app.models.schemas import CreateOrderRequest, CreateOrderResponse, CreatedOrder, DownstreamResult
+
+# Metrics for API calls (sync mode)
+api_calls_total = Counter(
+    'api_calls_total',
+    'Total API calls made by order service',
+    ['service', 'status']
+)
 
 ORDERS: dict[str, CreatedOrder] = {}
 
@@ -22,6 +32,9 @@ def create_order(payload: CreateOrderRequest) -> CreateOrderResponse:
         status="created",
         created_at=created_at,
     )
+
+    if kafka_enabled():
+        return _create_order_with_kafka(order)
 
     email_result = _run_email_confirmation(order)
     inventory_result = _run_inventory_reduction(order)
@@ -40,11 +53,87 @@ def create_order(payload: CreateOrderRequest) -> CreateOrderResponse:
     )
 
 
+def _create_order_with_kafka(order: CreatedOrder) -> CreateOrderResponse:
+    fallback_sync = _kafka_fallback_sync_enabled()
+
+    try:
+        publish_meta = publish_order_created(order)
+    except Exception as exc:
+        if not fallback_sync:
+            failure_message = f"Kafka publish failed: {exc}"
+            order.status = "partial-failure"
+            failure_data = {"mode": "kafka", "error": str(exc)}
+            email_result = DownstreamResult(
+                success=False,
+                service="email-service",
+                message=failure_message,
+                data=failure_data,
+            )
+            inventory_result = DownstreamResult(
+                success=False,
+                service="inventory-service",
+                message=failure_message,
+                data=failure_data,
+            )
+            ORDERS[order.order_id] = order
+            return CreateOrderResponse(
+                order=order,
+                email_service=email_result,
+                inventory_service=inventory_result,
+            )
+
+        email_result = _run_email_confirmation(order)
+        inventory_result = _run_inventory_reduction(order)
+        mode_data = {
+            "mode": "sync-fallback",
+            "kafka_error": str(exc),
+        }
+        email_result = _merge_result_data(email_result, mode_data)
+        inventory_result = _merge_result_data(inventory_result, mode_data)
+
+        if email_result.success and inventory_result.success:
+            order.status = "processed"
+        else:
+            order.status = "partial-failure"
+
+        ORDERS[order.order_id] = order
+        return CreateOrderResponse(
+            order=order,
+            email_service=email_result,
+            inventory_service=inventory_result,
+        )
+
+    order.status = "queued"
+    queued_data = {
+        "mode": "kafka",
+        "event": publish_meta,
+    }
+    email_result = DownstreamResult(
+        success=True,
+        service="email-service",
+        message="Order event queued for async email processing",
+        data=queued_data,
+    )
+    inventory_result = DownstreamResult(
+        success=True,
+        service="inventory-service",
+        message="Order event queued for async inventory processing",
+        data=queued_data,
+    )
+
+    ORDERS[order.order_id] = order
+    return CreateOrderResponse(
+        order=order,
+        email_service=email_result,
+        inventory_service=inventory_result,
+    )
+
+
 def _run_email_confirmation(order: CreatedOrder) -> DownstreamResult:
     payload = {
         "order_id": order.order_id,
         "user_id": order.user_id,
-        "email": str(order.email), 
+        "email": str(order.email),
         "items": [item.model_dump() for item in order.items],
     }
 
@@ -79,6 +168,7 @@ def _call_with_retry(service_name: str, call: Callable[[], DownstreamResult]) ->
             result = call()
             result_data = dict(result.data or {})
             result_data["attempts"] = attempt
+            api_calls_total.labels(service=service_name, status="success").inc()
             return DownstreamResult(
                 success=result.success,
                 service=result.service,
@@ -93,6 +183,7 @@ def _call_with_retry(service_name: str, call: Callable[[], DownstreamResult]) ->
                 sleep(current_backoff)
             current_backoff = min(current_backoff * backoff_multiplier, max_backoff)
 
+    api_calls_total.labels(service=service_name, status="failure").inc()
     return DownstreamResult(
         success=False,
         service=service_name,
@@ -120,3 +211,19 @@ def _get_float_env(name: str, default: float, minimum: float) -> float:
     except ValueError:
         return default
     return value if value >= minimum else minimum
+
+
+def _kafka_fallback_sync_enabled() -> bool:
+    raw = os.getenv("KAFKA_FALLBACK_SYNC", "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _merge_result_data(result: DownstreamResult, extra_data: dict) -> DownstreamResult:
+    merged = dict(result.data or {})
+    merged.update(extra_data)
+    return DownstreamResult(
+        success=result.success,
+        service=result.service,
+        message=result.message,
+        data=merged,
+    )

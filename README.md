@@ -1,6 +1,6 @@
 # FastAPI Microservices: Order, Email, Inventory
 
-This project contains three services connected with direct API calls:
+This project contains three services connected through Kafka events (with optional synchronous fallback):
 
 - Order Service creates orders
 - Email Service sends order confirmations
@@ -12,12 +12,17 @@ It also includes an in-cluster Load Orchestrator service:
 - Optionally simulates outage by scaling down email or inventory deployment during a run
 - Provides a simple browser UI for scenario control and status
 
-Flow:
+Flow (default Kafka mode):
 
 1. Client calls `POST /orders` on Order Service.
 2. Order Service creates an order in memory.
-3. Order Service calls Email Service `POST /confirm-order`.
-4. Order Service calls Inventory Service `POST /reduce-stock`.
+3. Order Service publishes an `order.created` event to Kafka.
+4. Email and Inventory services consume the event asynchronously and process it in background threads.
+
+Optional compatibility mode:
+
+- If Kafka is disabled, Order Service uses direct HTTP calls to Email and Inventory.
+- If Kafka is enabled but publish fails and `KAFKA_FALLBACK_SYNC=true`, Order Service falls back to direct HTTP calls.
 
 This repo now includes resilience controls for load and chaos testing:
 
@@ -31,6 +36,7 @@ This repo now includes resilience controls for load and chaos testing:
 - Order Service: `http://localhost:8000`
 - Email Service: `http://localhost:8001`
 - Inventory Service: `http://localhost:8002`
+- Kafka Broker: `localhost:9092`
 - Load Orchestrator UI (Kubernetes NodePort): `http://localhost:30081`
 - Prometheus UI (Kubernetes NodePort): `http://localhost:30090`
 - Grafana UI (Kubernetes NodePort): `http://localhost:30300` (`admin` / `admin`)
@@ -43,7 +49,18 @@ From repository root:
 docker compose up --build
 ```
 
-Retry behavior for Order Service is configured with these environment variables:
+Order requests are asynchronous by default in compose (`KAFKA_ENABLED=true`, `KAFKA_FALLBACK_SYNC=false`), so the API response typically returns `order.status = queued` after the event is published.
+
+Kafka-related environment variables:
+
+- `KAFKA_ENABLED` (default `false`)
+- `KAFKA_BOOTSTRAP_SERVERS` (default `kafka:9092`)
+- `KAFKA_ORDER_CREATED_TOPIC` (default `orders.created`)
+- `KAFKA_FALLBACK_SYNC` (default `false`)
+- `EMAIL_PROVIDER_API_DELAY_SECONDS` (default `0`) simulates external email provider API latency in Email Service
+- `INVENTORY_DB_CALL_DELAY_SECONDS` (default `0`) simulates DB call latency in Inventory Service
+
+Retry behavior for direct HTTP downstream calls is configured with these environment variables:
 
 - `DOWNSTREAM_MAX_RETRIES` (default `4`)
 - `DOWNSTREAM_INITIAL_BACKOFF_SECONDS` (default `0.1`)
@@ -132,10 +149,12 @@ The `observability.yaml` stack provisions Prometheus and Grafana with a ready da
 
 Dashboard panels include:
 
-1. Request rate by service
-2. 5xx error ratio by service
-3. P95 latency by service
-4. In-progress requests by service
+1. All services throughput by service
+2. Email service event processing rate
+3. Inventory service event processing rate
+4. Order service request rate
+5. CPU usage by service (order, email, inventory)
+6. Kafka event resolution counts (produced, processed, and backlog)
 
 After deployment, open Grafana at `http://localhost:30300` and use the pre-provisioned dashboard to watch spike behavior, downtime windows, and recovery.
 
@@ -147,6 +166,7 @@ kubectl -n kafka-lab port-forward svc/order-service 8000:8000
 
 Kubernetes manifests are in `k8s/` and include:
 
+- Kafka Deployment + Service (single-node KRaft)
 - Deployment + Service for all three services
 - Resource requests/limits for each container
 - HorizontalPodAutoscaler definitions
@@ -181,9 +201,9 @@ or
 
 Expected behavior:
 
-- During outage, Order Service retries downstream calls with exponential backoff.
-- Some requests will become `partial-failure` while downstream is unavailable.
-- After recovery, retryable calls should begin succeeding again.
+- With Kafka mode (`KAFKA_ENABLED=true`), `POST /orders` keeps returning quickly with `status=queued` while consumers handle work asynchronously.
+- During email or inventory outage, events remain in Kafka and processing resumes after service recovery.
+- With compatibility mode (`KAFKA_ENABLED=false`), behavior reverts to synchronous retries and possible `partial-failure` responses.
 
 Optional: toggle failure mode without scaling deployments
 

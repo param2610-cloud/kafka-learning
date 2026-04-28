@@ -15,10 +15,21 @@ spec:
     spec:
       containers:
         - name: email-service
-          image: kafka-email-service:latest
+          image: kafka-email-service:dev
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8001
+          env:
+            - name: KAFKA_ENABLED
+              value: "false"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: kafka:9092
+            - name: KAFKA_ORDER_CREATED_TOPIC
+              value: orders.created
+            - name: KAFKA_AUTO_OFFSET_RESET
+              value: earliest
+            - name: EMAIL_PROVIDER_API_DELAY_SECONDS
+              value: "0.12"
           resources:
             requests:
               cpu: "100m"

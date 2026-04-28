@@ -10,22 +10,51 @@ data:
       evaluation_interval: 5s
 
     scrape_configs:
-      - job_name: order-service
-        metrics_path: /metrics
-        static_configs:
-          - targets: ["order-service.kafka-lab.svc.cluster.local:8000"]
-      - job_name: email-service
-        metrics_path: /metrics
-        static_configs:
-          - targets: ["email-service.kafka-lab.svc.cluster.local:8001"]
-      - job_name: inventory-service
-        metrics_path: /metrics
-        static_configs:
-          - targets: ["inventory-service.kafka-lab.svc.cluster.local:8002"]
-      - job_name: load-orchestrator
-        metrics_path: /metrics
-        static_configs:
-          - targets: ["load-orchestrator.kafka-lab.svc.cluster.local:8080"]
+      - job_name: kafka-lab-pods
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace]
+            action: keep
+            regex: kafka-lab
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: order-service|email-service|inventory-service|load-orchestrator
+          - source_labels: [__meta_kubernetes_pod_container_port_number]
+            action: keep
+            regex: 8000|8001|8002|8080
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            target_label: job
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-sa
+  namespace: kafka-lab
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-k8s-discovery-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-k8s-discovery-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-k8s-discovery-role
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-sa
+    namespace: kafka-lab
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -42,6 +71,7 @@ spec:
       labels:
         app: prometheus
     spec:
+      serviceAccountName: prometheus-sa
       containers:
         - name: prometheus
           image: prom/prometheus:v2.54.1
@@ -137,65 +167,194 @@ data:
         {
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "fieldConfig": {"defaults": {}, "overrides": []},
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
           "id": 1,
           "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
           "targets": [
             {
-              "expr": "sum by (job) (rate(http_requests_total[1m]))",
+              "expr": "(sum by (job) (rate(http_requests_total{job=\"order-service\",handler!~\"/health|/metrics\"}[1m]))) or (sum by (job) (rate(order_events_processed_total{job=~\"email-service|inventory-service\"}[1m])))",
               "legendFormat": "{{job}}",
               "refId": "A"
             }
           ],
-          "title": "Request Rate by Service (req/s)",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
-          "id": 2,
-          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
-          "targets": [
-            {
-              "expr": "sum by (job) (rate(http_requests_total{status=~\"5..\"}[1m])) / sum by (job) (rate(http_requests_total[1m]))",
-              "legendFormat": "{{job}}",
-              "refId": "A"
-            }
-          ],
-          "title": "5xx Error Ratio by Service",
-          "type": "timeseries"
-        },
-        {
-          "datasource": {"type": "prometheus", "uid": "prometheus"},
-          "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
-          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
-          "id": 3,
-          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
-          "targets": [
-            {
-              "expr": "histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket[1m])))",
-              "legendFormat": "{{job}}",
-              "refId": "A"
-            }
-          ],
-          "title": "P95 Latency by Service",
+          "title": "All Services Throughput by Service (/s)",
           "type": "timeseries"
         },
         {
           "datasource": {"type": "prometheus", "uid": "prometheus"},
           "fieldConfig": {"defaults": {}, "overrides": []},
-          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+          "id": 2,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "(sum(rate(order_events_processed_total{job=\"email-service\"}[1m])) or on() vector(0)) + (sum(rate(api_calls_total{job=\"email-service\",endpoint=\"confirm-order\",status=\"success\"}[1m])) or on() vector(0))",
+              "legendFormat": "email-service (kafka + api)",
+              "refId": "A"
+            }
+          ],
+          "title": "Email Service Processing Rate (evt/s + api/s)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {}, "overrides": []},
+          "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+          "id": 3,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "(sum(rate(order_events_processed_total{job=\"inventory-service\"}[1m])) or on() vector(0)) + (sum(rate(api_calls_total{job=\"inventory-service\",endpoint=\"reduce-stock\",status=\"success\"}[1m])) or on() vector(0))",
+              "legendFormat": "inventory-service (kafka + api)",
+              "refId": "A"
+            }
+          ],
+          "title": "Inventory Service Processing Rate (evt/s + api/s)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {}, "overrides": []},
+          "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
           "id": 4,
           "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
           "targets": [
             {
-              "expr": "sum by (job) (http_requests_inprogress)",
+              "expr": "sum(rate(http_requests_total{job=\"order-service\",handler!~\"/health|/metrics\"}[1m])) or on() vector(0)",
+              "legendFormat": "order-service",
+              "refId": "A"
+            }
+          ],
+          "title": "Order Service Request Rate (req/s)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {}, "overrides": []},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+          "id": 10,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "sum(rate(api_calls_total{job=\"order-service\",status=\"success\"}[1m])) or on() vector(0)",
+              "legendFormat": "order-service api calls/s",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(rate(api_calls_total{job=\"email-service\",status=\"success\"}[1m])) or on() vector(0)",
+              "legendFormat": "email-service api calls/s",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(rate(api_calls_total{job=\"inventory-service\",status=\"success\"}[1m])) or on() vector(0)",
+              "legendFormat": "inventory-service api calls/s",
+              "refId": "C"
+            }
+          ],
+          "title": "API Request Processing Rate (api/s)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "cores"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+          "id": 5,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "sum by (job) (rate(process_cpu_seconds_total{job=~\"order-service|email-service|inventory-service\"}[1m]))",
               "legendFormat": "{{job}}",
               "refId": "A"
             }
           ],
-          "title": "In-Progress Requests by Service",
+          "title": "CPU Usage by Service (cores)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 32},
+          "id": 8,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "sum(api_calls_total{job=\"order-service\",status=\"success\"}) or on() vector(0)",
+              "legendFormat": "order-service api total",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(api_calls_total{job=\"email-service\",status=\"success\"}) or on() vector(0)",
+              "legendFormat": "email-service api total",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(api_calls_total{job=\"inventory-service\",status=\"success\"}) or on() vector(0)",
+              "legendFormat": "inventory-service api total",
+              "refId": "C"
+            },
+            {
+              "expr": "sum(api_calls_total{job=\"order-service\",status=\"failure\"}) or on() vector(0)",
+              "legendFormat": "order-service api failures",
+              "refId": "D"
+            },
+            {
+              "expr": "sum(api_calls_total{job=\"email-service\",status=\"failure\"}) or on() vector(0)",
+              "legendFormat": "email-service api failures",
+              "refId": "E"
+            },
+            {
+              "expr": "sum(api_calls_total{job=\"inventory-service\",status=\"failure\"}) or on() vector(0)",
+              "legendFormat": "inventory-service api failures",
+              "refId": "F"
+            }
+          ],
+          "title": "API Call Total Counts (Success & Failures)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 40},
+          "id": 9,
+          "options": {"legend": {"displayMode": "table", "placement": "bottom"}},
+          "targets": [
+            {
+              "expr": "sum(order_events_produced_total{job=\"order-service\"})",
+              "legendFormat": "order produced total",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(order_events_processed_total{job=\"email-service\"})",
+              "legendFormat": "email kafka processed total",
+              "refId": "B"
+            },
+            {
+              "expr": "sum(order_events_processed_total{job=\"inventory-service\"})",
+              "legendFormat": "inventory kafka processed total",
+              "refId": "C"
+            },
+            {
+              "expr": "sum(api_calls_total{job=\"email-service\",status=\"success\"})",
+              "legendFormat": "email api total",
+              "refId": "D"
+            },
+            {
+              "expr": "sum(api_calls_total{job=\"inventory-service\",status=\"success\"})",
+              "legendFormat": "inventory api total",
+              "refId": "E"
+            },
+            {
+              "expr": "clamp_min(sum(order_events_produced_total{job=\"order-service\"}) - sum(order_events_processed_total{job=\"email-service\"}), 0)",
+              "legendFormat": "email backlog (kafka)",
+              "refId": "F"
+            },
+            {
+              "expr": "clamp_min(sum(order_events_produced_total{job=\"order-service\"}) - sum(order_events_processed_total{job=\"inventory-service\"}), 0)",
+              "legendFormat": "inventory backlog (kafka)",
+              "refId": "G"
+            }
+          ],
+          "title": "Hybrid Event Resolution Counts (Kafka + API)",
           "type": "timeseries"
         }
       ],
@@ -209,7 +368,7 @@ data:
       "timezone": "",
       "title": "Kafka Lab Service Health",
       "uid": "kafka-lab-services",
-      "version": 1,
+      "version": 9,
       "weekStart": ""
     }
 ---

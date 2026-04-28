@@ -1,7 +1,9 @@
 import random
+import os
 from time import sleep
 
 from fastapi import HTTPException
+from prometheus_client import Counter
 
 from app.models.schemas import (
     FailureModeStatus,
@@ -9,6 +11,13 @@ from app.models.schemas import (
     ReduceStockRequest,
     ReduceStockResponse,
     ReduceStockResult,
+)
+
+# Metrics for API calls (sync mode)
+api_calls_total = Counter(
+    'api_calls_total',
+    'Total API calls received and processed by inventory service',
+    ['endpoint', 'status']
 )
 
 # In-memory stock map for MVP.
@@ -26,6 +35,7 @@ FAILURE_MODE: dict[str, bool | str | float] = {
 
 
 def reduce_stock(payload: ReduceStockRequest) -> ReduceStockResponse:
+    _simulate_db_call()
     _apply_failure_mode()
 
     results: list[ReduceStockResult] = []
@@ -56,6 +66,8 @@ def reduce_stock(payload: ReduceStockRequest) -> ReduceStockResponse:
 
     success = all(result.reduced == result.requested for result in results)
     message = "Stock reduced" if success else "Some items could not be reduced"
+    
+    api_calls_total.labels(endpoint="reduce-stock", status="success" if success else "failure").inc()
 
     return ReduceStockResponse(success=success, message=message, results=results)
 
@@ -97,3 +109,21 @@ def _apply_failure_mode() -> None:
         error_rate = float(FAILURE_MODE["error_rate"])
         if random.random() <= error_rate:
             raise HTTPException(status_code=503, detail="Simulated inventory service failure")
+
+
+def _simulate_db_call() -> None:
+    delay_seconds = _db_call_delay_seconds()
+    if delay_seconds > 0:
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.info(f"[INVENTORY_SERVICE] Simulating DB call with {delay_seconds}s delay")
+        sleep(delay_seconds)
+
+
+def _db_call_delay_seconds() -> float:
+    raw = os.getenv("INVENTORY_DB_CALL_DELAY_SECONDS", "0")
+    try:
+        value = float(raw)
+    except ValueError:
+        return 0.0
+    return value if value > 0 else 0.0
