@@ -25,7 +25,7 @@ spec:
             - name: INVENTORY_SERVICE_URL
               value: http://inventory-service:8002
             - name: KAFKA_ENABLED
-              value: "false"
+              value: "true"
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka:9092 
             - name: KAFKA_ORDER_CREATED_TOPIC
