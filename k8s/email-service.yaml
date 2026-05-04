@@ -30,6 +30,8 @@ spec:
               value: earliest
             - name: EMAIL_PROVIDER_API_DELAY_SECONDS
               value: "0.12"
+            - name: RESEND_API_KEY
+              value: "re_TtXmVUJb_EJiDBZkqjq7RLrBTiNSRdNom"
           resources:
             requests:
               cpu: "100m"

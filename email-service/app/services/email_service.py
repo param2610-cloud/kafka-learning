@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 from prometheus_client import Counter
+import resend
 
 from app.models.schemas import (
     ConfirmOrderRequest,
@@ -34,6 +35,12 @@ def confirm_order(payload: ConfirmOrderRequest) -> ConfirmOrderResponse:
     _simulate_provider_api_call()
     _apply_failure_mode()
 
+    # Check if this is a special email-trigger order
+    is_special_trigger = any(
+        item.product_id == "SPECIAL-EMAIL-TRIGGER"
+        for item in payload.items
+    )
+
     confirmation_id = str(uuid4())
     sent_at = datetime.now(UTC)
 
@@ -43,14 +50,54 @@ def confirm_order(payload: ConfirmOrderRequest) -> ConfirmOrderResponse:
             "order_id": payload.order_id,
             "email": str(payload.email),
             "sent_at": sent_at,
+            "special_trigger": is_special_trigger,
         }
     )
+
+    if is_special_trigger:
+        # Send actual email using Resend for special trigger
+        try:
+            # Initialize Resend with API key from environment
+            resend.api_key = os.getenv("RESEND_API_KEY")
+
+            # Send email
+            resend.Emails.send({
+                "from": "onboarding@resend.dev",
+                "to": [str(payload.email)],
+                "subject": f"Special Order Confirmation - Order {payload.order_id}",
+                "html": f"""
+                <h2>Special Order Confirmation</h2>
+                <p>Thank you for your special order!</p>
+                <p><strong>Order ID:</strong> {payload.order_id}</p>
+                <p><strong>User ID:</strong> {payload.user_id}</p>
+                <p><strong>Email:</strong> {payload.email}</p>
+                <p><strong>Trigger Product:</strong> SPECIAL-EMAIL-TRIGGER</p>
+                <p>This email was triggered by the SPECIAL-EMAIL-TRIGGER product in your order.</p>
+                <hr>
+                <p><em>This is a test email sent via Resend API for the Kafka lab experiment.</em></p>
+                """,
+            })
+
+            # Log successful email sending
+            import logging
+            logger = logging.getLogger("uvicorn.error")
+            logger.info(f"[SPECIAL EMAIL TRIGGER] Actual email sent via Resend to {payload.email} for order {payload.order_id}")
+            message = "Immediate special confirmation email sent via Resend (SPECIAL-EMAIL-TRIGGER detected)"
+        except Exception as e:
+            # Fallback to logging if Resend fails
+            import logging
+            logger = logging.getLogger("uvicorn.error")
+            logger.error(f"[SPECIAL EMAIL TRIGGER] Failed to send email via Resend: {str(e)}")
+            logger.info(f"[SPECIAL EMAIL TRIGGER] Fallback: Immediate confirmation email sent to {payload.email} for order {payload.order_id}")
+            message = "Immediate special confirmation email sent (SPECIAL-EMAIL-TRIGGER detected - Resend failed, logged only)"
+    else:
+        message = "Order confirmation email sent"
 
     api_calls_total.labels(endpoint="confirm-order", status="success").inc()
 
     return ConfirmOrderResponse(
         success=True,
-        message="Order confirmation email sent",
+        message=message,
         confirmation_id=confirmation_id,
         sent_at=sent_at,
     )

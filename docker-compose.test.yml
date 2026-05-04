@@ -1,0 +1,111 @@
+version: '3.8'
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      DYNAMIC_CONFIG_ENABLED: "true"
+
+  email-service:
+    build:
+      context: ./email-service
+    container_name: email-service
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ORDER_CREATED_TOPIC: orders.created
+      EMAIL_PROVIDER_API_DELAY_SECONDS: "0.12"
+      RESEND_API_KEY: "re_TtXmVUJb_EJiDBZkqjq7RLrBTiNSRdNom"
+    ports:
+      - "8001:8001"
+
+  inventory-service:
+    build:
+      context: ./inventory-service
+    container_name: inventory-service
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ORDER_CREATED_TOPIC: orders.created
+      INVENTORY_DB_CALL_DELAY_SECONDS: "0.03"
+    ports:
+      - "8002:8002"
+
+  order-service:
+    build:
+      context: ./order-service
+    container_name: order-service
+    depends_on:
+      - kafka
+      - email-service
+      - inventory-service
+    environment:
+      EMAIL_SERVICE_URL: http://email-service:8001
+      INVENTORY_SERVICE_URL: http://inventory-service:8002
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_ORDER_CREATED_TOPIC: orders.created
+      KAFKA_FALLBACK_SYNC: "false"
+      DOWNSTREAM_MAX_RETRIES: "4"
+      DOWNSTREAM_INITIAL_BACKOFF_SECONDS: "0.1"
+      DOWNSTREAM_BACKOFF_MULTIPLIER: "2.0"
+      DOWNSTREAM_MAX_BACKOFF_SECONDS: "2.0"
+      DOWNSTREAM_REQUEST_TIMEOUT_SECONDS: "2.0"
+    ports:
+      - "8000:8000"
+
+  load-orchestrator:
+    build:
+      context: ./load-orchestrator
+    container_name: load-orchestrator
+    depends_on:
+      - kafka
+    environment:
+      TARGET_NAMESPACE: kafka-lab
+      ORDER_BASE_URL: http://order-service:8000
+    ports:
+      - "8081:8080"
+    # Add Kafka UI for monitoring
+    # Note: Using existing kafka-ui service from earlier
+
+networks:
+  default:
+    name: kafka-local

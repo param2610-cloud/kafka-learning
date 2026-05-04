@@ -30,6 +30,7 @@ def kafka_enabled() -> bool:
 
 def start_consumer() -> None:
     global _THREAD
+    logger.info(f"Kafka enabled check: {kafka_enabled()}")
     if not kafka_enabled():
         logger.info("Email Kafka consumer disabled because KAFKA_ENABLED is false")
         return
@@ -44,8 +45,12 @@ def start_consumer() -> None:
         os.getenv("KAFKA_EMAIL_GROUP_ID", "email-service-group"),
         ",".join(_bootstrap_servers()),
     )
-    _THREAD = threading.Thread(target=_consume_loop, name="email-order-events-consumer", daemon=True)
-    _THREAD.start()
+    try:
+        _THREAD = threading.Thread(target=_consume_loop, name="email-order-events-consumer", daemon=True)
+        _THREAD.start()
+        logger.info(f"Started consumer thread: {_THREAD.name}")
+    except Exception as e:
+        logger.exception(f"Failed to start consumer thread: {e}")
 
 
 def stop_consumer() -> None:

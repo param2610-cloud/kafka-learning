@@ -38,6 +38,12 @@ def reduce_stock(payload: ReduceStockRequest) -> ReduceStockResponse:
     _simulate_db_call()
     _apply_failure_mode()
 
+    # Check for special email trigger product
+    has_special_trigger = any(
+        item.product_id == "SPECIAL-EMAIL-TRIGGER"
+        for item in payload.items
+    )
+
     results: list[ReduceStockResult] = []
 
     for item in payload.items:
@@ -66,7 +72,13 @@ def reduce_stock(payload: ReduceStockRequest) -> ReduceStockResponse:
 
     success = all(result.reduced == result.requested for result in results)
     message = "Stock reduced" if success else "Some items could not be reduced"
-    
+
+    if has_special_trigger:
+        # Log special inventory trigger for immediate visibility
+        import logging
+        logger = logging.getLogger("uvicorn.error")
+        logger.info(f"[SPECIAL INVENTORY TRIGGER] Immediate stock update processed for SPECIAL-EMAIL-TRIGGER")
+
     api_calls_total.labels(endpoint="reduce-stock", status="success" if success else "failure").inc()
 
     return ReduceStockResponse(success=success, message=message, results=results)

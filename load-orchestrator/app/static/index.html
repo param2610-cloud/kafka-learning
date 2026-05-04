@@ -132,6 +132,26 @@
         </div>
       </div>
 
+      <!-- Special Order Trigger Section -->
+      <div class="card">
+        <h2>Special Order Trigger (Simulate Buy Button)</h2>
+        <p>Trigger a special order with SPECIAL-EMAIL-TRIGGER product to send immediate email confirmation.</p>
+        <div class="grid">
+          <div>
+            <label>User ID</label>
+            <input id="special_user_id" type="text" value="test-user" />
+          </div>
+          <div>
+            <label>Email</label>
+            <input id="special_email" type="email" value="test@example.com" />
+          </div>
+        </div>
+        <div class="actions">
+          <button onclick="triggerSpecialOrder()">Trigger Special Order</button>
+          <button class="secondary" onclick="clearSpecialForm()">Clear Form</button>
+        </div>
+      </div>
+
       <div class="run-list" id="runs"></div>
     </div>
 
@@ -219,6 +239,25 @@
         } catch (err) {
           runsEl.innerHTML = `<p>Failed to load runs: ${err.message}</p>`;
         }
+      }
+
+      async function triggerSpecialOrder() {
+        const userId = document.getElementById("special_user_id").value;
+        const email = document.getElementById("special_email").value;
+        try {
+          const response = await api("/special-order", {
+            method: "POST",
+            body: JSON.stringify({ user_id: userId, email: email }),
+          });
+          alert(`Special order triggered: ${response.order.order_id}`);
+        } catch (err) {
+          alert(`Failed to trigger special order: ${err.message}`);
+        }
+      }
+
+      function clearSpecialForm() {
+        document.getElementById("special_user_id").value = "test-user";
+        document.getElementById("special_email").value = "test@example.com";
       }
 
       refreshRuns();

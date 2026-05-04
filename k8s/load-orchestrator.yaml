@@ -137,11 +137,11 @@ spec:
               value: kafka-lab
           resources:
             requests:
-              cpu: "200m"
-              memory: "256Mi"
+              cpu: "2000m"
+              memory: "4Gi"
             limits:
-              cpu: "500m"
-              memory: "512Mi"
+              cpu: "4000m"
+              memory: "8Gi"
           readinessProbe:
             httpGet:
               path: /api/health

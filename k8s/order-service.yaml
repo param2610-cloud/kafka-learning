@@ -4,7 +4,7 @@ metadata:
   name: order-service
   namespace: kafka-lab
 spec:
-  replicas: 6
+  replicas: 3
   selector:
     matchLabels:
       app: order-service
@@ -44,11 +44,11 @@ spec:
               value: "1.5"
           resources:
             requests:
-              cpu: "600m"
-              memory: "512Mi"
+              cpu: "50m"
+              memory: "64Mi"
             limits:
-              cpu: "2000m"
-              memory: "1536Mi"
+              cpu: "100m"
+              memory: "128Mi"
           readinessProbe:
             httpGet:
               path: /health
