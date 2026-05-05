@@ -1,4 +1,5 @@
 import os
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from time import sleep
@@ -9,6 +10,10 @@ from prometheus_client import Counter
 from app.clients import email_client, inventory_client
 from app.messaging import kafka_enabled, publish_order_created
 from app.models.schemas import CreateOrderRequest, CreateOrderResponse, CreatedOrder, DownstreamResult
+from app.cache.redis_client import get_redis_client
+from app.config.feature_flags import is_redis_enabled, should_prefer_cache
+
+logger = logging.getLogger("uvicorn.error")
 
 # Metrics for API calls (sync mode)
 api_calls_total = Counter(
@@ -54,6 +59,9 @@ def create_order(payload: CreateOrderRequest) -> CreateOrderResponse:
 
 
 def _create_order_with_kafka(order: CreatedOrder) -> CreateOrderResponse:
+    # Update Redis cache immediately if enabled
+    _update_redis_cache_from_order(order)
+    
     fallback_sync = _kafka_fallback_sync_enabled()
 
     try:
@@ -223,7 +231,58 @@ def _merge_result_data(result: DownstreamResult, extra_data: dict) -> Downstream
     merged.update(extra_data)
     return DownstreamResult(
         success=result.success,
-        service=result.service,
+     
+
+
+def _update_redis_cache_from_order(order: CreatedOrder) -> None:
+    """Update Redis cache immediately when order is created (before Kafka processing)"""
+    if not is_redis_enabled():
+        return
+
+    try:
+        redis_client = get_redis_client()
+        if not redis_client.is_connected():
+            logger.warning("Redis not connected, skipping cache update")
+            return
+
+        for item in order.items:
+            product_id = item.product_id
+            quantity = item.quantity
+
+            # Get current stock from Redis
+            current_stock = redis_client.get_stock(product_id)
+
+            if current_stock is None:
+                # If product not in Redis, fetch from DB and set initial value
+                # This is a fallback scenario
+                logger.warning(
+                    f"Product {product_id} not found in Redis cache, initializing"
+                )
+                # Try to get from inventory service and initialize
+                try:
+                    # For now, we'll just log as this would require calling inventory service
+                    logger.warning(
+                        f"Skipping initialization for {product_id}, will be synced on next inventory call"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to initialize {product_id} in Redis: {e}")
+                continue
+
+            # Check if we have enough stock
+            if current_stock >= quantity:
+                new_stock = current_stock - quantity
+                redis_client.set_stock(product_id, new_stock)
+                logger.info(
+                    f"[REDIS CACHE] Updated {product_id}: {current_stock} -> {new_stock} for order {order.order_id}"
+                )
+            else:
+                logger.warning(
+                    f"[REDIS CACHE] Insufficient stock for {product_id}: "
+                    f"requested={quantity}, available={current_stock}, order={order.order_id}"
+                )
+
+    except Exception as e:
+        logger.error(f"Failed to update Redis cache for order {order.order_id}: {e}")   service=result.service,
         message=result.message,
         data=merged,
     )

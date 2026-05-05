@@ -45,6 +45,11 @@ def _namespace() -> str:
     return os.getenv("TARGET_NAMESPACE", "kafka-lab")
 
 
+def _get_env(name: str, default: str) -> str:
+    value = os.getenv(name, default).strip()
+    return value or default
+
+
 def start_run(request: StartRunRequest) -> RunSummary:
     run_id = str(uuid4())[:8]
     job_name = f"k6-run-{run_id}"
@@ -58,6 +63,11 @@ def start_run(request: StartRunRequest) -> RunSummary:
         client.V1EnvVar(name="ORDER_BASE_URL", value=request.order_base_url),
     ]
 
+    k6_cpu_request = _get_env("K6_CPU_REQUEST", "500m")
+    k6_cpu_limit = _get_env("K6_CPU_LIMIT", "2000m")
+    k6_memory_request = _get_env("K6_MEMORY_REQUEST", "1Gi")
+    k6_memory_limit = _get_env("K6_MEMORY_LIMIT", "4Gi")
+
     container = client.V1Container(
         name="k6",
         image="grafana/k6:1.2.3",
@@ -65,8 +75,8 @@ def start_run(request: StartRunRequest) -> RunSummary:
         env=env,
         volume_mounts=[client.V1VolumeMount(name="k6-script", mount_path="/scripts")],
         resources=client.V1ResourceRequirements(
-            requests={"cpu": "500m", "memory": "512Mi"},
-            limits={"cpu": "2000m", "memory": "2Gi"},
+            requests={"cpu": k6_cpu_request, "memory": k6_memory_request},
+            limits={"cpu": k6_cpu_limit, "memory": k6_memory_limit},
         ),
     )
 

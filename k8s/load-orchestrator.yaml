@@ -117,6 +117,8 @@ metadata:
   namespace: kafka-lab
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: load-orchestrator

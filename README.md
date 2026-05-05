@@ -141,6 +141,15 @@ Use the UI to:
 2. Toggle chaos mode and choose target service.
 3. Start a run and observe logs/status from the dashboard.
 
+The k6 job now uses a larger default memory budget to avoid `OOMKilled` during heavier runs. If you need to tune the runner for a specific cluster, set these environment variables before starting the orchestrator service:
+
+- `K6_CPU_REQUEST`
+- `K6_CPU_LIMIT`
+- `K6_MEMORY_REQUEST`
+- `K6_MEMORY_LIMIT`
+
+Defaults are `500m`, `2000m`, `1Gi`, and `4Gi` respectively.
+
 ## Visualization and Bottleneck Detection
 
 The `observability.yaml` stack provisions Prometheus and Grafana with a ready dashboard called:

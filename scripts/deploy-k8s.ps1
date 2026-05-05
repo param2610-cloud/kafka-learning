@@ -44,7 +44,6 @@ foreach ($image in $images) {
 
 $currentContext = kubectl config current-context
 Write-Host "Current kubectl context: $currentContext"
-
 if ($currentContext -like "kind-*") {
     $kindClusterName = $currentContext.Substring(5)
     Write-Host "Loading images into kind cluster '$kindClusterName'..."
@@ -58,8 +57,27 @@ elseif ($currentContext -eq "minikube") {
         minikube image load $image.Ref
     }
 }
+elseif ($currentContext -eq "docker-desktop") {
+    Write-Host "Using Docker Desktop Kubernetes; local Docker images are available to the cluster."
+    Write-Host "No image load step required - deployments will reference the locally built image refs."
+}
 else {
-    Write-Host "No explicit image-load step for context '$currentContext'."
+    # Non-local clusters must be able to pull the built images. Support a simple registry push workflow.
+    $registry = $env:DOCKER_REGISTRY
+    if (-not $registry) {
+        Write-Error "Cluster context '$currentContext' is not kind/minikube and DOCKER_REGISTRY is not set."
+        Write-Error "Either use a local kind/minikube cluster, or set DOCKER_REGISTRY (e.g. myregistry.example.com/myrepo) and ensure 'docker push' can authenticate."
+        exit 1
+    }
+
+    Write-Host "Tagging and pushing images to registry '$registry'..."
+    foreach ($image in $images) {
+        $fullRef = "$registry/$($image.Name):$tag"
+        docker tag $image.Ref $fullRef
+        docker push $fullRef
+        # update the ref used later when updating deployments
+        $image.Ref = $fullRef
+    }
 }
 
 Write-Host "Applying Kubernetes manifests..."

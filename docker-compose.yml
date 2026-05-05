@@ -1,4 +1,16 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    command: redis-server --appendonly yes
+
   kafka:
     image: bitnami/kafka:3.7
     container_name: kafka
@@ -38,6 +50,10 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ORDER_CREATED_TOPIC: orders.created
       EMAIL_PROVIDER_API_DELAY_SECONDS: "0.12"
+      REDIS_ENABLED: "false"
+      REDIS_PREFER_CACHE: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
     ports:
       - "8001:8001"
 
@@ -48,20 +64,27 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       KAFKA_ENABLED: "true"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_ORDER_CREATED_TOPIC: orders.created
       INVENTORY_DB_CALL_DELAY_SECONDS: "0.03"
+      REDIS_PREFER_CACHE: "true"
+      REDIS_ENABLED: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
     ports:
       - "8002:8002"
 
   order-service:
-    build:
-      context: ./order-service
+    bucontext: ./order-service
     container_name: order-service
     depends_on:
       kafka:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       email-service:
         condition: service_started
@@ -79,5 +102,9 @@ services:
       DOWNSTREAM_BACKOFF_MULTIPLIER: "2.0"
       DOWNSTREAM_MAX_BACKOFF_SECONDS: "2.0"
       DOWNSTREAM_REQUEST_TIMEOUT_SECONDS: "2.0"
+      REDIS_ENABLED: "false"
+      REDIS_PREFER_CACHE: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
     ports:
       - "8000:8000"

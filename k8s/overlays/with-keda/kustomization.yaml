@@ -1,0 +1,22 @@
+# Kustomization with KEDA enabled
+# Use this overlay to deploy with Kafka lag-based auto-scaling
+# Command: kubectl apply -k k8s/overlays/with-keda
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kafka-lab
+
+bases:
+  - ../../
+
+patchesStrategicMerge: []
+
+resources:
+  - ../../keda.yaml
+
+commonLabels:
+  autoscaling: keda
+
+commonAnnotations:
+  keda.enabled: "true"

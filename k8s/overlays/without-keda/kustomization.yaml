@@ -1,0 +1,23 @@
+# Kustomization without KEDA (traditional HPA)
+# Use this overlay to deploy with CPU/memory-based auto-scaling only
+# Command: kubectl apply -k k8s/overlays/without-keda
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kafka-lab
+
+bases:
+  - ../../
+
+# Remove KEDA ScaledObjects
+patchesStrategicMerge: []
+
+# Don't include KEDA resources
+resources: []
+
+commonLabels:
+  autoscaling: hpa
+
+commonAnnotations:
+  keda.enabled: "false"

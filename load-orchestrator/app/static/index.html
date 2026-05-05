@@ -81,8 +81,36 @@
       <h1>Cluster Load Orchestrator</h1>
       <p>Run in-cluster load tests against Order Service and optionally inject outage chaos.</p>
 
+      <!-- Stock Management Section -->
       <div class="card">
+        <h2>Stock Management</h2>
+        <p>View and initialize stock before running load tests.</p>
+        <div id="stock_display" style="margin-bottom: 15px; padding: 10px; background: #0e1630; border-radius: 8px;">
+          <p>Loading stock...</p>
+        </div>
         <div class="grid">
+          <div>
+            <label>Pencil Stock</label>
+            <input id="stock_pencil" type="number" value="100" min="1" />
+          </div>
+          <div>
+            <label>Notebook Stock</label>
+            <input id="stock_notebook" type="number" value="50" min="1" />
+          </div>
+          <div>
+            <label>Eraser Stock</label>
+            <input id="stock_eraser" type="number" value="75" min="1" />
+          </div>
+        </div>
+        <div class="actions">
+          <button onclick="refreshStock()">Refresh Stock</button>
+          <button class="secondary" onclick="setStock()">Initialize Stock</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Load Test Configuration</h2>
+        <p>Configure and run load tests against Order Service.</p>
           <div>
             <label>Total Requests</label>
             <input id="total_requests" type="number" value="2000" min="1" />
@@ -166,6 +194,65 @@
           throw new Error(text || `Request failed: ${res.status}`);
         }
         return res.json();
+      }
+
+      async function refreshStock() {
+        const stockEl = document.getElementById("stock_display");
+        try {
+          const stock = await api("/stock");
+          const html = `
+            <p><strong>Current Stock Levels:</strong></p>
+            <ul style="margin: 10px 0; padding-left: 20px;">
+              <li>Pencil: <strong>${stock.pencil || 0}</strong></li>
+              <li>Notebook: <strong>${stock.notebook || 0}</strong></li>
+              <li>Eraser: <strong>${stock.eraser || 0}</strong></li>
+            </ul>
+            <p style="color: #6ee7a2; font-size: 12px;">✓ Stock fetched from Inventory Service</p>
+          `;
+          stockEl.innerHTML = html;
+          
+          // Update form fields with current values
+          document.getElementById("stock_pencil").value = stock.pencil || 100;
+          document.getElementById("stock_notebook").value = stock.notebook || 50;
+          document.getElementById("stock_eraser").value = stock.eraser || 75;
+        } catch (err) {
+          stockEl.innerHTML = `<p style="color: #ff7a7a;">⚠ Failed to fetch stock: ${err.message}</p>`;
+        }
+      }
+
+      async function setStock() {
+        const pencil = Number(document.getElementById("stock_pencil").value);
+        const notebook = Number(document.getElementById("stock_notebook").value);
+        const eraser = Number(document.getElementById("stock_eraser").value);
+        
+        if (pencil < 1 || notebook < 1 || eraser < 1) {
+          alert("All stock values must be greater than 0");
+          return;
+        }
+        
+        try {
+          const response = await api("/stock", {
+            method: "POST",
+            body: JSON.stringify({
+              pencil: pencil,
+              notebook: notebook,
+              eraser: eraser,
+            }),
+          });
+          
+          const prev = response.previous || {};
+          const curr = response.current || {};
+          
+          alert(
+            `✓ Stock Initialized!\n\n` +
+            `Previous: pencil=${prev.pencil || 0}, notebook=${prev.notebook || 0}, eraser=${prev.eraser || 0}\n` +
+            `Current: pencil=${curr.pencil || 0}, notebook=${curr.notebook || 0}, eraser=${curr.eraser || 0}\n\n` +
+            `Message: ${response.message}`
+          );
+          await refreshStock();
+        } catch (err) {
+          alert(`Failed to set stock: ${err.message}`);
+        }
       }
 
       function collectPayload() {
@@ -260,6 +347,7 @@
         document.getElementById("special_email").value = "test@example.com";
       }
 
+      refreshStock();
       refreshRuns();
       setInterval(refreshRuns, 8000);
     </script>

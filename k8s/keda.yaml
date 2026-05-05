@@ -1,0 +1,70 @@
+# KEDA Configuration for Kafka-based Auto-scaling
+# This enables auto-scaling based on Kafka lag instead of CPU/memory metrics
+#
+# FEATURE FLAG: Set KEDA_ENABLED=true to use KEDA ScaledObjects
+# Default: false (uses traditional HPA based on CPU/memory)
+#
+# To enable KEDA:
+# 1. Install KEDA: kubectl apply -f https://github.com/kedacore/keda/releases/download/v2.13.0/keda-2.13.0.yaml
+# 2. Apply this file: kubectl apply -f k8s/keda.yaml
+# 3. Disable HPA: kubectl delete -f k8s/hpa.yaml
+#
+# Benefits with KEDA:
+# - Scales based on Kafka consumer lag (actual queue backlog)
+# - Proactive scaling (scales UP when lag increases, DOWN when caught up)
+# - More efficient than CPU-based scaling for event-driven workloads
+# - No wasted resources on idle processing
+
+---
+# ScaledObject for Email Service
+# Scales email-service based on Kafka lag for orders.created topic
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: email-service-keda
+  namespace: kafka-lab
+spec:
+  scaleTargetRef:
+    name: email-service
+    apiVersion: apps/v1
+    kind: Deployment
+  minReplicaCount: 2
+  maxReplicaCount: 16
+  pollingInterval: 30
+  cooldownPeriod: 300
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: email-service-consumer
+        topic: orders.created
+        lagThreshold: "10"
+        offsetResetPolicy: latest
+        allowIdleConsumers: "false"
+
+---
+# ScaledObject for Inventory Service
+# Scales inventory-service based on Kafka lag for orders.created topic
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: inventory-service-keda
+  namespace: kafka-lab
+spec:
+  scaleTargetRef:
+    name: inventory-service
+    apiVersion: apps/v1
+    kind: Deployment
+  minReplicaCount: 2
+  maxReplicaCount: 16
+  pollingInterval: 30
+  cooldownPeriod: 300
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka:9092
+        consumerGroup: inventory-service-consumer
+        topic: orders.created
+        lagThreshold: "10"
+        offsetResetPolicy: latest
+        allowIdleConsumers: "false"

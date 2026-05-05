@@ -1,16 +1,84 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import HTMLResponse
+import httpx
 
 from app.models.schemas import RunDetails, StartRunRequest, StartRunResponse, StopRunResponse
 from app.services import runner
 
 router = APIRouter(prefix="/api", tags=["orchestrator"])
 
+# Inventory service URL
+INVENTORY_SERVICE_URL = "http://inventory-service:8002"
+
 
 class SpecialOrderRequest(BaseModel):
     user_id: str
     email: str
+
+
+class SetStockRequest(BaseModel):
+    pencil: int = 100
+    notebook: int = 50
+    eraser: int = 75
+
+
+@router.get("/health")
+def health() -> dict[str, str]:
+    return {"service": "load-orchestrator", "status": "ok"}
+
+
+@router.get("/stock")
+def get_stock() -> dict:
+    """Get current stock from inventory service"""
+    try:
+        response = httpx.get(
+            f"{INVENTORY_SERVICE_URL}/stock",
+            timeout=5.0
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get stock: {str(e)}")
+
+
+@router.post("/stock")
+def set_stock(payload: SetStockRequest) -> dict:
+    """Initialize/Set stock in inventory service"""
+    try:
+        # Get previous stock first
+        try:
+            prev_response = httpx.get(
+                f"{INVENTORY_SERVICE_URL}/stock",
+                timeout=5.0
+            )
+            prev_response.raise_for_status()
+            previous_stock = prev_response.json()
+        except:
+            previous_stock = {}
+        
+        # Set new stock
+        stock_data = {
+            "pencil": payload.pencil,
+            "notebook": payload.notebook,
+            "eraser": payload.eraser,
+        }
+        
+        response = httpx.post(
+            f"{INVENTORY_SERVICE_URL}/stock",
+            json=stock_data,
+            timeout=5.0
+        )
+        response.raise_for_status()
+        new_stock = response.json()
+        
+        return {
+            "message": "Stock initialized successfully",
+            "previous": previous_stock,
+            "current": new_stock
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to set stock: {str(e)}")
 
 
 @router.get("/health")
