@@ -35,7 +35,7 @@ spec:
   triggers:
     - type: kafka
       metadata:
-        bootstrapServers: kafka:9092
+        bootstrapServers: kafka.kafka-lab.svc.cluster.local:9092
         consumerGroup: email-service-consumer
         topic: orders.created
         lagThreshold: "10"
@@ -62,7 +62,7 @@ spec:
   triggers:
     - type: kafka
       metadata:
-        bootstrapServers: kafka:9092
+        bootstrapServers: kafka.kafka-lab.svc.cluster.local:9092
         consumerGroup: inventory-service-consumer
         topic: orders.created
         lagThreshold: "10"

@@ -41,8 +41,7 @@ data:
         user_id: userId,
         email: `${userId}@example.com`,
         items: [
-          { product_id: "pencil", quantity: (iteration % 3) + 1 },
-          { product_id: "notebook", quantity: 1 },
+          { product_id: __ENV.SELECTED_PRODUCT || "pencil", quantity: (iteration % 3) + 1 },
         ],
       });
     }

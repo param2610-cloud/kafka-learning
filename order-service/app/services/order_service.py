@@ -26,54 +26,57 @@ ORDERS: dict[str, CreatedOrder] = {}
 
 
 def create_order(payload: CreateOrderRequest) -> CreateOrderResponse:
-    # Pre-check inventory availability before creating order
-    try:
-        check_result = inventory_client.check_stock_availability(
-            [item.model_dump() for item in payload.items]
-        )
-        logger.info(f"Stock check result: {check_result}")
-        if not check_result.get("available", False):
-            # Stock not available - reject order
-            unavailable_items = [
-                detail.get("product_id") 
-                for detail in check_result.get("details", []) 
-                if not detail.get("in_stock", False)
-            ]
-            error_message = f"Insufficient stock for items: {', '.join(unavailable_items)}"
-            logger.warning(f"Order rejected: {error_message}")
-            
-            order_id = str(uuid4())
-            order = CreatedOrder(
-                order_id=order_id,
-                user_id=payload.user_id,
-                email=payload.email,
-                items=payload.items,
-                status="rejected",
-                created_at=datetime.now(UTC),
+    if _inventory_http_precheck_enabled():
+        # Pre-check inventory availability before creating order
+        try:
+            check_result = inventory_client.check_stock_availability(
+                [item.model_dump() for item in payload.items]
             )
-            
-            inventory_result = DownstreamResult(
-                success=False,
-                service="inventory-service",
-                message=error_message,
-                data=check_result,
+            logger.info(f"Stock check result: {check_result}")
+            if not check_result.get("available", False):
+                # Stock not available - reject order
+                unavailable_items = [
+                    detail.get("product_id")
+                    for detail in check_result.get("details", [])
+                    if not detail.get("in_stock", False)
+                ]
+                error_message = f"Insufficient stock for items: {', '.join(unavailable_items)}"
+                logger.warning(f"Order rejected: {error_message}")
+
+                order_id = str(uuid4())
+                order = CreatedOrder(
+                    order_id=order_id,
+                    user_id=payload.user_id,
+                    email=payload.email,
+                    items=payload.items,
+                    status="rejected",
+                    created_at=datetime.now(UTC),
+                )
+
+                inventory_result = DownstreamResult(
+                    success=False,
+                    service="inventory-service",
+                    message=error_message,
+                    data=check_result,
+                )
+
+                email_result = DownstreamResult(
+                    success=False,
+                    service="email-service",
+                    message="Order rejected due to insufficient stock",
+                    data={"reason": "stock_unavailable"},
+                )
+
+                ORDERS[order.order_id] = order
+                return CreateOrderResponse(
+                    order=order,
+                    email_service=email_result,
+                    inventory_service=inventory_result,
+                )
+        except Exception as exc:
+            logger.warning(
+                f"Stock availability check failed: {exc}, proceeding with order creation"
             )
-            
-            email_result = DownstreamResult(
-                success=False,
-                service="email-service",
-                message="Order rejected due to insufficient stock",
-                data={"reason": "stock_unavailable"},
-            )
-            
-            ORDERS[order.order_id] = order
-            return CreateOrderResponse(
-                order=order,
-                email_service=email_result,
-                inventory_service=inventory_result,
-            )
-    except Exception as exc:
-        logger.warning(f"Stock availability check failed: {exc}, proceeding with order creation")
     
     order_id = str(uuid4())
     created_at = datetime.now(UTC)
@@ -272,6 +275,11 @@ def _get_float_env(name: str, default: float, minimum: float) -> float:
 
 def _kafka_fallback_sync_enabled() -> bool:
     raw = os.getenv("KAFKA_FALLBACK_SYNC", "false").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _inventory_http_precheck_enabled() -> bool:
+    raw = os.getenv("INVENTORY_HTTP_PRECHECK_ENABLED", "true").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 

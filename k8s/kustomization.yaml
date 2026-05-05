@@ -9,3 +9,4 @@ resources:
   - load-orchestrator.yaml
   - observability.yaml
   - hpa.yaml
+  - keda.yaml

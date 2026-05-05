@@ -20,10 +20,6 @@ spec:
           ports:
             - containerPort: 8000
           env:
-            - name: EMAIL_SERVICE_URL
-              value: http://email-service:8001
-            - name: INVENTORY_SERVICE_URL
-              value: http://inventory-service:8002
             - name: KAFKA_ENABLED
               value: "true"
             - name: KAFKA_BOOTSTRAP_SERVERS
@@ -31,6 +27,8 @@ spec:
             - name: KAFKA_ORDER_CREATED_TOPIC
               value: orders.created
             - name: KAFKA_FALLBACK_SYNC
+              value: "false"
+            - name: INVENTORY_HTTP_PRECHECK_ENABLED
               value: "false"
             - name: DOWNSTREAM_MAX_RETRIES
               value: "5"

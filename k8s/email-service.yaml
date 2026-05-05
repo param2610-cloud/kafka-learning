@@ -24,6 +24,8 @@ spec:
               value: "true"
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: kafka:9092
+            - name: KAFKA_EMAIL_GROUP_ID
+              value: email-service-consumer
             - name: KAFKA_ORDER_CREATED_TOPIC
               value: orders.created
             - name: KAFKA_AUTO_OFFSET_RESET
