@@ -1,5 +1,5 @@
 # KEDA Configuration for Kafka-based Auto-scaling
-# This enables auto-scaling based on Kafka lag instead of CPU/memory metrics
+# This enables email-service auto-scaling based on Kafka lag.
 #
 # FEATURE FLAG: Set KEDA_ENABLED=true to use KEDA ScaledObjects
 # Default: false (uses traditional HPA based on CPU/memory)
@@ -9,11 +9,9 @@
 # 2. Apply this file: kubectl apply -f k8s/keda.yaml
 # 3. Disable HPA: kubectl delete -f k8s/hpa.yaml
 #
-# Benefits with KEDA:
-# - Scales based on Kafka consumer lag (actual queue backlog)
-# - Proactive scaling (scales UP when lag increases, DOWN when caught up)
-# - More efficient than CPU-based scaling for event-driven workloads
-# - No wasted resources on idle processing
+# Inventory service is intentionally not scaled by Kafka lag here. Kafka is the
+# buffer in front of stock reduction, and scaling inventory consumers by lag can
+# increase downstream DB/write pressure. Inventory uses a small CPU HPA instead.
 
 ---
 # ScaledObject for Email Service
@@ -42,29 +40,3 @@ spec:
         offsetResetPolicy: latest
         allowIdleConsumers: "false"
 
----
-# ScaledObject for Inventory Service
-# Scales inventory-service based on Kafka lag for orders.created topic
-apiVersion: keda.sh/v1alpha1
-kind: ScaledObject
-metadata:
-  name: inventory-service-keda
-  namespace: kafka-lab
-spec:
-  scaleTargetRef:
-    name: inventory-service
-    apiVersion: apps/v1
-    kind: Deployment
-  minReplicaCount: 2
-  maxReplicaCount: 16
-  pollingInterval: 30
-  cooldownPeriod: 300
-  triggers:
-    - type: kafka
-      metadata:
-        bootstrapServers: kafka.kafka-lab.svc.cluster.local:9092
-        consumerGroup: inventory-service-consumer
-        topic: orders.created
-        lagThreshold: "10"
-        offsetResetPolicy: latest
-        allowIdleConsumers: "false"

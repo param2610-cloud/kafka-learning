@@ -7,6 +7,7 @@ const virtualUsers = Number(__ENV.VUS || 2000);
 const maxDuration = __ENV.MAX_DURATION || "20m";
 const uniqueUsers = Number(__ENV.UNIQUE_USERS || 1000);
 const orderBaseUrl = __ENV.ORDER_BASE_URL || "http://localhost:8000";
+const inventoryBaseUrl = __ENV.INVENTORY_BASE_URL || orderBaseUrl.replace("order-service", "inventory-service").replace(":8000", ":8002");
 const targetItem = __ENV.TARGET_ITEM || "pencil";
 const itemQuantity = Number(__ENV.ITEM_QUANTITY || 1);
 
@@ -32,24 +33,28 @@ export const options = {
 
 function buildOrderPayload(iteration) {
   const userId = `u-${(iteration % uniqueUsers) + 1}`;
-  return JSON.stringify({
+  return {
     user_id: userId,
     email: `${userId}@example.com`,
     items: [
       { product_id: targetItem, quantity: itemQuantity },
     ],
-  });
+  };
 }
 
-function checkItemAvailability(item) {
-  // Check inventory endpoint to see if item is available before ordering
-  const inventoryUrl = orderBaseUrl.replace('/orders', '').replace(':8000', ':8002') || "http://localhost:8002";
+function checkItemAvailability(items) {
   try {
-    const response = http.get(`${inventoryUrl}/inventory?product_id=${item}`, { timeout: "5s" });
+    const response = http.post(
+      `${inventoryBaseUrl}/check-availability`,
+      JSON.stringify({ items }),
+      {
+        headers: { "Content-Type": "application/json" },
+        timeout: "5s",
+      },
+    );
     if (response.status === 200) {
       const body = response.json();
-      const stock = body && body.stock ? body.stock : 0;
-      return stock > 0;
+      return Boolean(body && body.available);
     }
     return false;
   } catch(e) {
@@ -58,13 +63,14 @@ function checkItemAvailability(item) {
 }
 
 export default function () {
-  // Check if item is available before attempting order
-  if (!checkItemAvailability(targetItem)) {
+  const orderPayload = buildOrderPayload(__ITER);
+
+  if (!checkItemAvailability(orderPayload.items)) {
     hardFailureRate.add(0); // Don't count as failure - item just unavailable
     return;
   }
 
-  const response = http.post(`${orderBaseUrl}/orders`, buildOrderPayload(__ITER), {
+  const response = http.post(`${orderBaseUrl}/orders`, JSON.stringify(orderPayload), {
     headers: { "Content-Type": "application/json" },
     timeout: "10s",
   });

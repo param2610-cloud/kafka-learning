@@ -8,10 +8,10 @@ from uuid import uuid4
 from prometheus_client import Counter
 
 from app.clients import email_client, inventory_client
-from app.messaging import kafka_enabled, publish_order_created
-from app.models.schemas import CreateOrderRequest, CreateOrderResponse, CreatedOrder, DownstreamResult
 from app.cache.redis_client import get_redis_client
 from app.config.feature_flags import is_redis_enabled, should_prefer_cache
+from app.messaging import kafka_enabled, publish_order_created
+from app.models.schemas import CreateOrderRequest, CreateOrderResponse, CreatedOrder, DownstreamResult
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -111,14 +111,42 @@ def create_order(payload: CreateOrderRequest) -> CreateOrderResponse:
 
 
 def _create_order_with_kafka(order: CreatedOrder) -> CreateOrderResponse:
-    # Update Redis cache immediately if enabled
-    _update_redis_cache_from_order(order)
-    
     fallback_sync = _kafka_fallback_sync_enabled()
+    reservation = _reserve_inventory_for_order(order)
+
+    if reservation is not None and not reservation["success"]:
+        order.status = "rejected"
+        inventory_result = DownstreamResult(
+            success=False,
+            service="inventory-service",
+            message=reservation["message"],
+            data=reservation,
+        )
+        email_result = DownstreamResult(
+            success=False,
+            service="email-service",
+            message="Order rejected due to insufficient stock",
+            data={"reason": "stock_unavailable"},
+        )
+        ORDERS[order.order_id] = order
+        return CreateOrderResponse(
+            order=order,
+            email_service=email_result,
+            inventory_service=inventory_result,
+        )
 
     try:
-        publish_meta = publish_order_created(order)
+        if reservation is not None:
+            publish_meta = publish_order_created(
+                order,
+                inventory_reservation=reservation["event"],
+            )
+        else:
+            publish_meta = publish_order_created(order)
     except Exception as exc:
+        if reservation is not None and reservation["success"]:
+            _release_inventory_reservation(order, reservation)
+
         if not fallback_sync:
             failure_message = f"Kafka publish failed: {exc}"
             order.status = "partial-failure"
@@ -168,6 +196,8 @@ def _create_order_with_kafka(order: CreatedOrder) -> CreateOrderResponse:
         "mode": "kafka",
         "event": publish_meta,
     }
+    if reservation is not None and reservation["success"]:
+        queued_data["inventory_reservation"] = reservation["event"]
     email_result = DownstreamResult(
         success=True,
         service="email-service",
@@ -283,61 +313,144 @@ def _inventory_http_precheck_enabled() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
+def _inventory_redis_reservation_enabled() -> bool:
+    raw = os.getenv("INVENTORY_REDIS_RESERVATION_ENABLED", "true").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def _merge_result_data(result: DownstreamResult, extra_data: dict) -> DownstreamResult:
     merged = dict(result.data or {})
     merged.update(extra_data)
     return DownstreamResult(
         success=result.success,
+        service=result.service,
+        message=result.message,
         data=merged,
     )
 
 
-def _update_redis_cache_from_order(order: CreatedOrder) -> None:
-    """Update Redis cache immediately when order is created (before Kafka processing)"""
-    if not is_redis_enabled():
-        return
+def _reserve_inventory_for_order(order: CreatedOrder) -> dict | None:
+    if not (
+        _inventory_redis_reservation_enabled()
+        and is_redis_enabled()
+        and should_prefer_cache()
+    ):
+        return None
+
+    redis_client = get_redis_client()
+    reserved_results: list[dict] = []
 
     try:
-        redis_client = get_redis_client()
         if not redis_client.is_connected():
-            logger.warning("Redis not connected, skipping cache update")
-            return
+            return _reservation_failure(
+                order=order,
+                message="Inventory reservation failed because Redis is not connected",
+                results=[],
+            )
 
         for item in order.items:
-            product_id = item.product_id
-            quantity = item.quantity
-
-            # Get current stock from Redis
-            current_stock = redis_client.get_stock(product_id)
-
-            if current_stock is None:
-                # If product not in Redis, fetch from DB and set initial value
-                # This is a fallback scenario
-                logger.warning(
-                    f"Product {product_id} not found in Redis cache, initializing"
+            success, remaining = redis_client.check_and_reserve_stock(
+                item.product_id,
+                item.quantity,
+            )
+            if success:
+                available_before = remaining + item.quantity
+                result = {
+                    "product_id": item.product_id,
+                    "requested": item.quantity,
+                    "reduced": item.quantity,
+                    "remaining": remaining,
+                    "reason": None,
+                }
+                reserved_results.append(result)
+                logger.info(
+                    "Order reserved inventory in Redis order_id=%s product_id=%s requested=%s available_before=%s remaining=%s",
+                    order.order_id,
+                    item.product_id,
+                    item.quantity,
+                    available_before,
+                    remaining,
                 )
-                # Try to get from inventory service and initialize
-                try:
-                    # For now, we'll just log as this would require calling inventory service
-                    logger.warning(
-                        f"Skipping initialization for {product_id}, will be synced on next inventory call"
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to initialize {product_id} in Redis: {e}")
                 continue
 
-            # Check if we have enough stock
-            if current_stock >= quantity:
-                new_stock = current_stock - quantity
-                redis_client.set_stock(product_id, new_stock)
-                logger.info(
-                    f"[REDIS CACHE] Updated {product_id}: {current_stock} -> {new_stock} for order {order.order_id}"
-                )
-            else:
-                logger.warning(
-                    f"[REDIS CACHE] Insufficient stock for {product_id}: "
-                    f"requested={quantity}, available={current_stock}, order={order.order_id}"
-                )
+            _release_reserved_results(reserved_results)
+            result = {
+                "product_id": item.product_id,
+                "requested": item.quantity,
+                "reduced": 0,
+                "remaining": remaining,
+                "reason": "insufficient_stock",
+            }
+            logger.warning(
+                "Order rejected by Redis reservation order_id=%s product_id=%s requested=%s available=%s",
+                order.order_id,
+                item.product_id,
+                item.quantity,
+                remaining,
+            )
+            return _reservation_failure(
+                order=order,
+                message=f"Insufficient stock for items: {item.product_id}",
+                results=[*reserved_results, result],
+            )
+    except Exception as exc:
+        _release_reserved_results(reserved_results)
+        logger.exception("Inventory reservation failed order_id=%s", order.order_id)
+        return _reservation_failure(
+            order=order,
+            message=f"Inventory reservation failed: {exc}",
+            results=reserved_results,
+        )
 
-    except Exception as e:
-        logger.error(f"Failed to update Redis cache for order {order.order_id}: {e}")
+    event = {
+        "stock_reserved": True,
+        "source": "order-service-redis",
+        "results": reserved_results,
+    }
+    return {
+        "success": True,
+        "message": "Stock reserved in Redis",
+        "order_id": order.order_id,
+        "event": event,
+        "results": reserved_results,
+    }
+
+
+def _reservation_failure(order: CreatedOrder, message: str, results: list[dict]) -> dict:
+    return {
+        "success": False,
+        "message": message,
+        "order_id": order.order_id,
+        "event": None,
+        "results": results,
+    }
+
+
+def _release_inventory_reservation(order: CreatedOrder, reservation: dict) -> None:
+    released = _release_reserved_results(reservation.get("results", []))
+    logger.warning(
+        "Released Redis inventory reservation after Kafka publish failure order_id=%s released=%s",
+        order.order_id,
+        released,
+    )
+
+
+def _release_reserved_results(results: list[dict]) -> list[dict]:
+    redis_client = get_redis_client()
+    released = []
+    for result in results:
+        reduced = int(result.get("reduced") or 0)
+        if reduced <= 0:
+            continue
+        product_id = result["product_id"]
+        remaining = redis_client.increase_stock(product_id, reduced)
+        released.append(
+            {
+                "product_id": product_id,
+                "released": reduced,
+                "remaining": remaining,
+            }
+        )
+    return released
+
+

@@ -6,7 +6,7 @@ import threading
 from confluent_kafka import Consumer
 from prometheus_client import Counter
 
-from app.models.schemas import ReduceStockRequest
+from app.models.schemas import ReduceStockRequest, ReduceStockResponse, ReduceStockResult
 from app.services.inventory_service import reduce_stock
 
 logger = logging.getLogger("uvicorn.error")
@@ -124,12 +124,61 @@ def _process_order_created_event(event: dict) -> None:
             order_id=order["order_id"],
             items=order["items"],
         )
-        reduce_stock(payload)
+        reservation = event.get("inventory") or {}
+        logger.info(
+            "Inventory processing order-created event order_id=%s items=%s",
+            payload.order_id,
+            [item.model_dump() for item in payload.items],
+        )
+        if reservation.get("stock_reserved") is True:
+            response = _stock_already_reserved_response(payload, reservation)
+            logger.info(
+                "Inventory skipped stock reduction for pre-reserved order order_id=%s source=%s",
+                payload.order_id,
+                reservation.get("source", "unknown"),
+            )
+        else:
+            response = reduce_stock(payload)
         ORDER_EVENTS_PROCESSED_TOTAL.inc()
-        logger.info("Inventory processed order-created event order_id=%s", payload.order_id)
+        logger.info(
+            "Inventory processed order-created event order_id=%s success=%s message=%s results=%s",
+            payload.order_id,
+            response.success,
+            response.message,
+            [result.model_dump() for result in response.results],
+        )
     except Exception:
         ORDER_EVENTS_PROCESS_FAILED_TOTAL.inc()
         logger.exception("Failed to process order-created event in inventory service")
+
+
+def _stock_already_reserved_response(
+    payload: ReduceStockRequest,
+    reservation: dict,
+) -> ReduceStockResponse:
+    results_by_product = {
+        result.get("product_id"): result
+        for result in reservation.get("results", [])
+    }
+    results = []
+    for item in payload.items:
+        reserved = results_by_product.get(item.product_id, {})
+        results.append(
+            ReduceStockResult(
+                product_id=item.product_id,
+                requested=item.quantity,
+                reduced=int(reserved.get("reduced", item.quantity)),
+                remaining=int(reserved.get("remaining", 0)),
+                reason=reserved.get("reason"),
+            )
+        )
+
+    success = all(result.reduced == result.requested for result in results)
+    return ReduceStockResponse(
+        success=success,
+        message="Stock already reserved (Redis)",
+        results=results,
+    )
 
 
 def _bootstrap_servers() -> list[str]:

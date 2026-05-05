@@ -24,7 +24,7 @@ def kafka_enabled() -> bool:
     return os.getenv("KAFKA_ENABLED", "false").strip().lower() == "true"
 
 
-def publish_order_created(order: CreatedOrder) -> dict:
+def publish_order_created(order: CreatedOrder, inventory_reservation: dict | None = None) -> dict:
     topic = _order_created_topic()
     event_id = str(uuid4())
     event = {
@@ -33,6 +33,8 @@ def publish_order_created(order: CreatedOrder) -> dict:
         "emitted_at": datetime.now(UTC).isoformat(),
         "order": order.model_dump(mode="json"),
     }
+    if inventory_reservation is not None:
+        event["inventory"] = inventory_reservation
 
     producer = _producer()
     delivery = {}

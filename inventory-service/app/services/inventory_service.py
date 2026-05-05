@@ -41,9 +41,13 @@ def _ensure_redis_initialized() -> None:
         try:
             redis_client = get_redis_client()
             if redis_client.is_connected():
-                redis_client.initialize_stock(STOCK)
+                existing_stock = redis_client.get_all_stock()
+                if existing_stock:
+                    logger.info(f"Redis cache already initialized with stock data: {existing_stock}")
+                else:
+                    redis_client.initialize_stock(STOCK)
+                    logger.info(f"Redis cache initialized with stock data: {STOCK}")
                 _redis_initialized = True
-                logger.info(f"Redis cache initialized with stock data: {STOCK}")
             else:
                 logger.warning("Redis is enabled but not connected")
         except Exception as e:
@@ -72,7 +76,7 @@ def _check_stock_availability_redis(payload: CheckStockAvailabilityRequest) -> C
     
     try:
         for item in payload.items:
-            stock = redis_client.get_stock(item.product_id)
+            stock = redis_client.get_stock(item.product_id) or 0
             available = stock >= item.quantity
             details.append({
                 "product_id": item.product_id,
@@ -139,11 +143,26 @@ def _reduce_stock_redis(payload: ReduceStockRequest) -> ReduceStockResponse:
 
     try:
         for item in payload.items:
+            logger.info(
+                "Inventory reducing stock (Redis) order_id=%s product_id=%s requested=%s",
+                payload.order_id,
+                item.product_id,
+                item.quantity,
+            )
             success, remaining = redis_client.check_and_reserve_stock(
                 item.product_id, item.quantity
             )
             
             if success:
+                available_before = remaining + item.quantity
+                logger.info(
+                    "Inventory stock reserved (Redis) order_id=%s product_id=%s requested=%s available_before=%s remaining=%s",
+                    payload.order_id,
+                    item.product_id,
+                    item.quantity,
+                    available_before,
+                    remaining,
+                )
                 results.append(
                     ReduceStockResult(
                         product_id=item.product_id,
@@ -154,6 +173,14 @@ def _reduce_stock_redis(payload: ReduceStockRequest) -> ReduceStockResponse:
                     )
                 )
             else:
+                logger.warning(
+                    "Inventory insufficient stock (Redis) order_id=%s product_id=%s requested=%s available=%s remaining=%s",
+                    payload.order_id,
+                    item.product_id,
+                    item.quantity,
+                    remaining,
+                    remaining,
+                )
                 results.append(
                     ReduceStockResult(
                         product_id=item.product_id,
@@ -198,8 +225,23 @@ def _reduce_stock_db(payload: ReduceStockRequest) -> ReduceStockResponse:
 
     for item in payload.items:
         current = STOCK.get(item.product_id, 0)
+        logger.info(
+            "Inventory reducing stock (DB) order_id=%s product_id=%s requested=%s available_before=%s",
+            payload.order_id,
+            item.product_id,
+            item.quantity,
+            current,
+        )
         if current >= item.quantity:
             STOCK[item.product_id] = current - item.quantity
+            logger.info(
+                "Inventory stock reserved (DB) order_id=%s product_id=%s requested=%s available_before=%s remaining=%s",
+                payload.order_id,
+                item.product_id,
+                item.quantity,
+                current,
+                STOCK[item.product_id],
+            )
             results.append(
                 ReduceStockResult(
                     product_id=item.product_id,
@@ -210,6 +252,14 @@ def _reduce_stock_db(payload: ReduceStockRequest) -> ReduceStockResponse:
                 )
             )
         else:
+            logger.warning(
+                "Inventory insufficient stock (DB) order_id=%s product_id=%s requested=%s available=%s remaining=%s",
+                payload.order_id,
+                item.product_id,
+                item.quantity,
+                current,
+                current,
+            )
             results.append(
                 ReduceStockResult(
                     product_id=item.product_id,

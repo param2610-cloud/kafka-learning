@@ -70,6 +70,15 @@ class RedisClient:
             logger.error(f"Failed to set stock in Redis for {product_id}: {e}")
             return False
 
+    def increase_stock(self, product_id: str, quantity: int) -> Optional[int]:
+        """Increase stock by quantity, returns new stock level or None on error"""
+        try:
+            client = self._get_client()
+            return client.incrby(f"stock:{product_id}", quantity)
+        except Exception as e:
+            logger.error(f"Failed to increase stock in Redis for {product_id}: {e}")
+            return None
+
     def decrease_stock(self, product_id: str, quantity: int) -> Optional[int]:
         """Decrease stock by quantity, returns new stock level or None on error"""
         try:

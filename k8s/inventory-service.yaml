@@ -32,8 +32,12 @@ spec:
               value: earliest
             - name: INVENTORY_DB_CALL_DELAY_SECONDS
               value: "0.03"
+            - name: KAFKA_CONSUMER_MAX_RECORDS
+              value: "10"
+            - name: KAFKA_CONSUMER_POLL_TIMEOUT_MS
+              value: "500"
             - name: REDIS_ENABLED
-              value: "false"
+              value: "true"
             - name: REDIS_PREFER_CACHE
               value: "true"
             - name: REDIS_HOST
@@ -53,12 +57,16 @@ spec:
               port: 8002
             initialDelaySeconds: 3
             periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /health
               port: 8002
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
 ---
 apiVersion: v1
 kind: Service
