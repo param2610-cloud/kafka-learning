@@ -1,17 +1,15 @@
-import random
 import os
 from time import sleep
 import logging
 
-from fastapi import HTTPException
 from prometheus_client import Counter
 
 from app.models.schemas import (
-    FailureModeStatus,
-    FailureModeUpdate,
     ReduceStockRequest,
     ReduceStockResponse,
     ReduceStockResult,
+    CheckStockAvailabilityRequest,
+    CheckStockAvailabilityResponse,
 )
 from app.cache.redis_client import get_redis_client
 from app.config.feature_flags import is_redis_enabled, should_prefer_cache
@@ -31,12 +29,6 @@ STOCK: dict[str, int] = {
     "notebook": 50,
     "eraser": 75,
 }
-FAILURE_MODE: dict[str, bool | str | float] = {
-    "enabled": False,
-    "mode": "error",
-    "error_rate": 1.0,
-    "delay_seconds": 0.0,
-}
 
 # Track if Redis cache was initialized
 _redis_initialized: bool = False
@@ -51,10 +43,77 @@ def _ensure_redis_initialized() -> None:
             if redis_client.is_connected():
                 redis_client.initialize_stock(STOCK)
                 _redis_initialized = True
-                logger.info("Redis cache initialized with stock data")
+                logger.info(f"Redis cache initialized with stock data: {STOCK}")
+            else:
+                logger.warning("Redis is enabled but not connected")
         except Exception as e:
             logger.warning(f"Failed to initialize Redis: {e}")
             _redis_initialized = False
+    elif not is_redis_enabled():
+        logger.info("Redis is disabled")
+
+
+def check_stock_availability(payload: CheckStockAvailabilityRequest) -> CheckStockAvailabilityResponse:
+    """Check if all items are available before order creation"""
+    _ensure_redis_initialized()
+    
+    # Use Redis if enabled and preferred, otherwise use database
+    if is_redis_enabled() and should_prefer_cache():
+        return _check_stock_availability_redis(payload)
+    
+    return _check_stock_availability_db(payload)
+
+
+def _check_stock_availability_redis(payload: CheckStockAvailabilityRequest) -> CheckStockAvailabilityResponse:
+    """Check stock availability using Redis"""
+    redis_client = get_redis_client()
+    details = []
+    all_available = True
+    
+    try:
+        for item in payload.items:
+            stock = redis_client.get_stock(item.product_id)
+            available = stock >= item.quantity
+            details.append({
+                "product_id": item.product_id,
+                "requested": item.quantity,
+                "available": stock,
+                "in_stock": available,
+            })
+            if not available:
+                all_available = False
+        
+        message = "All items in stock" if all_available else "Some items out of stock"
+        api_calls_total.labels(endpoint="check-availability", status="success").inc()
+        return CheckStockAvailabilityResponse(available=all_available, message=message, details=details)
+    except Exception as e:
+        logger.error(f"Redis stock check failed: {e}")
+        # Fallback to database
+        logger.info("Falling back to database for stock check")
+        return _check_stock_availability_db(payload)
+
+
+def _check_stock_availability_db(payload: CheckStockAvailabilityRequest) -> CheckStockAvailabilityResponse:
+    """Check stock availability using in-memory database"""
+    details = []
+    all_available = True
+    
+    for item in payload.items:
+        current = STOCK.get(item.product_id, 0)
+        available = current >= item.quantity
+        details.append({
+            "product_id": item.product_id,
+            "requested": item.quantity,
+            "available": current,
+            "in_stock": available,
+        })
+        if not available:
+            all_available = False
+    
+    message = "All items in stock" if all_available else "Some items out of stock"
+    logger.info(f"Stock check (DB): {message}, details={details}")
+    api_calls_total.labels(endpoint="check-availability", status="success").inc()
+    return CheckStockAvailabilityResponse(available=all_available, message=message, details=details)
 
 
 def reduce_stock(payload: ReduceStockRequest) -> ReduceStockResponse:
@@ -70,8 +129,6 @@ def reduce_stock(payload: ReduceStockRequest) -> ReduceStockResponse:
 
 def _reduce_stock_redis(payload: ReduceStockRequest) -> ReduceStockResponse:
     """Reduce stock using Redis cache"""
-    _apply_failure_mode()
-
     has_special_trigger = any(
         item.product_id == "SPECIAL-EMAIL-TRIGGER"
         for item in payload.items
@@ -130,7 +187,6 @@ def _reduce_stock_redis(payload: ReduceStockRequest) -> ReduceStockResponse:
 def _reduce_stock_db(payload: ReduceStockRequest) -> ReduceStockResponse:
     """Reduce stock using in-memory database"""
     _simulate_db_call()
-    _apply_failure_mode()
 
     # Check for special email trigger product
     has_special_trigger = any(
@@ -214,41 +270,6 @@ def initialize_stock(stock_data: dict[str, int]) -> dict[str, int]:
             logger.warning(f"Failed to initialize stock in Redis: {e}")
     
     return STOCK
-
-
-def update_failure_mode(config: FailureModeUpdate) -> FailureModeStatus:
-    FAILURE_MODE["enabled"] = config.enabled
-    FAILURE_MODE["mode"] = config.mode
-    FAILURE_MODE["error_rate"] = config.error_rate
-    FAILURE_MODE["delay_seconds"] = config.delay_seconds
-    return get_failure_mode()
-
-
-def get_failure_mode() -> FailureModeStatus:
-    return FailureModeStatus(
-        service="inventory-service",
-        enabled=bool(FAILURE_MODE["enabled"]),
-        mode=str(FAILURE_MODE["mode"]),
-        error_rate=float(FAILURE_MODE["error_rate"]),
-        delay_seconds=float(FAILURE_MODE["delay_seconds"]),
-    )
-
-
-def _apply_failure_mode() -> None:
-    if not bool(FAILURE_MODE["enabled"]):
-        return
-
-    mode = str(FAILURE_MODE["mode"])
-    delay_seconds = float(FAILURE_MODE["delay_seconds"])
-
-    if mode == "delay" and delay_seconds > 0:
-        sleep(delay_seconds)
-        return
-
-    if mode == "error":
-        error_rate = float(FAILURE_MODE["error_rate"])
-        if random.random() <= error_rate:
-            raise HTTPException(status_code=503, detail="Simulated inventory service failure")
 
 
 def _simulate_db_call() -> None:

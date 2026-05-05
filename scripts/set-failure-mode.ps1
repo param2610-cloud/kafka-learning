@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("email", "inventory")]
+    [ValidateSet("email")]
     [string]$Service = "email",
     [bool]$Enabled = $true,
     [ValidateSet("error", "delay")]
@@ -9,8 +9,7 @@ param(
     [string]$BaseHost = "http://localhost"
 )
 
-$port = if ($Service -eq "email") { 8001 } else { 8002 }
-$uri = "$BaseHost`:$port/failure-mode"
+$uri = "$BaseHost`:8001/failure-mode"
 
 $payload = @{
     enabled = $Enabled
@@ -20,4 +19,4 @@ $payload = @{
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method Post -Uri $uri -ContentType "application/json" -Body $payload
-Write-Host "Updated failure mode for $Service via $uri"
+Write-Host "Updated failure mode for email via $uri"

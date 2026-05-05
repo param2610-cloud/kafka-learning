@@ -26,6 +26,55 @@ ORDERS: dict[str, CreatedOrder] = {}
 
 
 def create_order(payload: CreateOrderRequest) -> CreateOrderResponse:
+    # Pre-check inventory availability before creating order
+    try:
+        check_result = inventory_client.check_stock_availability(
+            [item.model_dump() for item in payload.items]
+        )
+        logger.info(f"Stock check result: {check_result}")
+        if not check_result.get("available", False):
+            # Stock not available - reject order
+            unavailable_items = [
+                detail.get("product_id") 
+                for detail in check_result.get("details", []) 
+                if not detail.get("in_stock", False)
+            ]
+            error_message = f"Insufficient stock for items: {', '.join(unavailable_items)}"
+            logger.warning(f"Order rejected: {error_message}")
+            
+            order_id = str(uuid4())
+            order = CreatedOrder(
+                order_id=order_id,
+                user_id=payload.user_id,
+                email=payload.email,
+                items=payload.items,
+                status="rejected",
+                created_at=datetime.now(UTC),
+            )
+            
+            inventory_result = DownstreamResult(
+                success=False,
+                service="inventory-service",
+                message=error_message,
+                data=check_result,
+            )
+            
+            email_result = DownstreamResult(
+                success=False,
+                service="email-service",
+                message="Order rejected due to insufficient stock",
+                data={"reason": "stock_unavailable"},
+            )
+            
+            ORDERS[order.order_id] = order
+            return CreateOrderResponse(
+                order=order,
+                email_service=email_result,
+                inventory_service=inventory_result,
+            )
+    except Exception as exc:
+        logger.warning(f"Stock availability check failed: {exc}, proceeding with order creation")
+    
     order_id = str(uuid4())
     created_at = datetime.now(UTC)
 
@@ -231,7 +280,8 @@ def _merge_result_data(result: DownstreamResult, extra_data: dict) -> Downstream
     merged.update(extra_data)
     return DownstreamResult(
         success=result.success,
-     
+        data=merged,
+    )
 
 
 def _update_redis_cache_from_order(order: CreatedOrder) -> None:
@@ -282,7 +332,4 @@ def _update_redis_cache_from_order(order: CreatedOrder) -> None:
                 )
 
     except Exception as e:
-        logger.error(f"Failed to update Redis cache for order {order.order_id}: {e}")   service=result.service,
-        message=result.message,
-        data=merged,
-    )
+        logger.error(f"Failed to update Redis cache for order {order.order_id}: {e}")

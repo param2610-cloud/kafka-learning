@@ -1,6 +1,7 @@
 resources:
   - namespace.yaml
   - kafka.yaml
+  - redis.yaml
   - redpanda-console.yaml
   - order-service.yaml
   - email-service.yaml

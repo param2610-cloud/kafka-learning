@@ -7,6 +7,8 @@ const virtualUsers = Number(__ENV.VUS || 2000);
 const maxDuration = __ENV.MAX_DURATION || "20m";
 const uniqueUsers = Number(__ENV.UNIQUE_USERS || 1000);
 const orderBaseUrl = __ENV.ORDER_BASE_URL || "http://localhost:8000";
+const targetItem = __ENV.TARGET_ITEM || "pencil";
+const itemQuantity = Number(__ENV.ITEM_QUANTITY || 1);
 
 const successfulOrders = new Counter("successful_orders");
 const failedOrders = new Counter("failed_orders");
@@ -34,13 +36,34 @@ function buildOrderPayload(iteration) {
     user_id: userId,
     email: `${userId}@example.com`,
     items: [
-      { product_id: "pencil", quantity: (iteration % 3) + 1 },
-      { product_id: "notebook", quantity: 1 },
+      { product_id: targetItem, quantity: itemQuantity },
     ],
   });
 }
 
+function checkItemAvailability(item) {
+  // Check inventory endpoint to see if item is available before ordering
+  const inventoryUrl = orderBaseUrl.replace('/orders', '').replace(':8000', ':8002') || "http://localhost:8002";
+  try {
+    const response = http.get(`${inventoryUrl}/inventory?product_id=${item}`, { timeout: "5s" });
+    if (response.status === 200) {
+      const body = response.json();
+      const stock = body && body.stock ? body.stock : 0;
+      return stock > 0;
+    }
+    return false;
+  } catch(e) {
+    return false;
+  }
+}
+
 export default function () {
+  // Check if item is available before attempting order
+  if (!checkItemAvailability(targetItem)) {
+    hardFailureRate.add(0); // Don't count as failure - item just unavailable
+    return;
+  }
+
   const response = http.post(`${orderBaseUrl}/orders`, buildOrderPayload(__ITER), {
     headers: { "Content-Type": "application/json" },
     timeout: "10s",

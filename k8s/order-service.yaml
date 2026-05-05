@@ -42,6 +42,14 @@ spec:
               value: "3.0"
             - name: DOWNSTREAM_REQUEST_TIMEOUT_SECONDS
               value: "1.5"
+            - name: REDIS_ENABLED
+              value: "false"
+            - name: REDIS_PREFER_CACHE
+              value: "true"
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
           resources:
             requests:
               cpu: "500m"

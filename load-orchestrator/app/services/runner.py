@@ -61,12 +61,14 @@ def start_run(request: StartRunRequest) -> RunSummary:
         client.V1EnvVar(name="MAX_DURATION", value=request.max_duration),
         client.V1EnvVar(name="UNIQUE_USERS", value=str(request.unique_users)),
         client.V1EnvVar(name="ORDER_BASE_URL", value=request.order_base_url),
+        client.V1EnvVar(name="TARGET_ITEM", value=request.target_item),
+        client.V1EnvVar(name="ITEM_QUANTITY", value=str(request.item_quantity)),
     ]
 
     k6_cpu_request = _get_env("K6_CPU_REQUEST", "500m")
     k6_cpu_limit = _get_env("K6_CPU_LIMIT", "2000m")
-    k6_memory_request = _get_env("K6_MEMORY_REQUEST", "1Gi")
-    k6_memory_limit = _get_env("K6_MEMORY_LIMIT", "4Gi")
+    k6_memory_request = _get_env("K6_MEMORY_REQUEST", "256Mi")
+    k6_memory_limit = _get_env("K6_MEMORY_LIMIT", "1Gi")
 
     container = client.V1Container(
         name="k6",

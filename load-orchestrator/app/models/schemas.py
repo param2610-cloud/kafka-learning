@@ -17,6 +17,8 @@ class StartRunRequest(BaseModel):
     max_duration: str = "2m"
     unique_users: int = Field(1000, ge=1)
     order_base_url: str = "http://order-service.kafka-lab.svc.cluster.local:8000"
+    target_item: str = Field("pencil", description="Product to order (pencil, notebook, eraser)")
+    item_quantity: int = Field(1, ge=1, le=1000)
     chaos: ChaosConfig = ChaosConfig()
 
 

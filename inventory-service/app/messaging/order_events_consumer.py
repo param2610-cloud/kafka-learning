@@ -80,12 +80,17 @@ def _consume_loop() -> None:
         _CONSUMER = None
         return
 
+    poll_count = 0
     while not _STOP_EVENT.is_set() and _CONSUMER is not None:
         try:
             messages = _CONSUMER.consume(
                 num_messages=_max_poll_records(),
                 timeout=_poll_timeout_ms() / 1000.0,
             )
+            poll_count += 1
+            if poll_count % 100 == 0:
+                logger.info(f"[INVENTORY CONSUMER] Poll #{poll_count}: received {len(messages) if messages else 0} messages")
+            
             if not messages:
                 continue
             for msg in messages:

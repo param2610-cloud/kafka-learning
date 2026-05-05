@@ -27,7 +27,7 @@ Optional compatibility mode:
 This repo now includes resilience controls for load and chaos testing:
 
 - Configurable retries with exponential backoff in Order Service.
-- Failure-mode toggles in Email and Inventory services.
+- Failure-mode toggles in Email service.
 - Kubernetes manifests with CPU and memory requests/limits.
 - A k6 script to drive up to 1,000,000 order requests.
 
@@ -60,6 +60,22 @@ Kafka-related environment variables:
 - `EMAIL_PROVIDER_API_DELAY_SECONDS` (default `0`) simulates external email provider API latency in Email Service
 - `INVENTORY_DB_CALL_DELAY_SECONDS` (default `0`) simulates DB call latency in Inventory Service
 
+Kafka partition planning for scale-out:
+
+- Consumer parallelism in one consumer group is capped by topic partition count.
+- If Email Service can scale to 16 replicas, keep `orders.created` at at least 16 partitions.
+- Set partitions before scaling up consumers to avoid idle replicas.
+- This repo pre-creates `orders.created` with 16 partitions in both Docker Compose and Kubernetes.
+- If `orders.created` already exists with fewer partitions, run a one-time `--alter` command to increase it.
+
+If you need to increase partitions further (example: 24):
+
+```bash
+kafka-topics.sh --bootstrap-server localhost:9092 --alter --topic orders.created --partitions 24
+```
+
+Note: partitions can be increased, not decreased.
+
 Retry behavior for direct HTTP downstream calls is configured with these environment variables:
 
 - `DOWNSTREAM_MAX_RETRIES` (default `4`)
@@ -90,10 +106,9 @@ curl -X POST http://localhost:8000/orders \
 - Inventory health: `GET /health` on port 8002
 - Inventory stock view: `GET /stock` on port 8002
 - Email failure mode: `GET /failure-mode` and `POST /failure-mode` on port 8001
-- Inventory failure mode: `GET /failure-mode` and `POST /failure-mode` on port 8002
 - Crash trigger (chaos): `POST /simulate-crash` on email/inventory services
 
-Failure mode request body:
+Failure mode request body (email service):
 
 ```json
 {
@@ -179,6 +194,7 @@ Kubernetes manifests are in `k8s/` and include:
 - Deployment + Service for all three services
 - Resource requests/limits for each container
 - HorizontalPodAutoscaler definitions
+- Kafka topic init Job that pre-creates `orders.created` with 16 partitions
 
 ## Million Request Chaos Scenario
 
@@ -190,10 +206,26 @@ kubectl -n kafka-lab port-forward svc/order-service 8000:8000
 
 Alternative (recommended): use Load Orchestrator UI at `http://localhost:30081` to run in-cluster k6 jobs without local port-forward load bottleneck.
 
-Terminal 2: start heavy load (1,000,000 requests)
+k6 load test environment variables:
+
+- `ORDER_BASE_URL` (default `http://localhost:8000`) - Order service endpoint
+- `TOTAL_REQUESTS` (default `1000000`) - Total order requests to generate
+- `VUS` (default `2000`) - Virtual users (concurrent load)
+- `MAX_DURATION` (default `20m`) - Maximum test duration
+- `UNIQUE_USERS` (default `1000`) - Pool of unique user IDs
+- `TARGET_ITEM` (default `pencil`) - Product ID to order (e.g., `pencil`, `notebook`, `eraser`)
+- `ITEM_QUANTITY` (default `1`) - Quantity of item per order
+
+Terminal 2: start heavy load ordering a specific item (1,000,000 requests of pencils)
 
 ```powershell
-k6 run .\load\k6\order_spike.js -e ORDER_BASE_URL=http://localhost:8000 -e TOTAL_REQUESTS=1000000 -e VUS=2000 -e MAX_DURATION=20m -e UNIQUE_USERS=1000
+k6 run .\load\k6\order_spike.js -e ORDER_BASE_URL=http://localhost:8000 -e TOTAL_REQUESTS=1000000 -e VUS=2000 -e MAX_DURATION=20m -e UNIQUE_USERS=1000 -e TARGET_ITEM=pencil -e ITEM_QUANTITY=1
+```
+
+Alternative: order notebooks instead
+
+```powershell
+k6 run .\load\k6\order_spike.js -e ORDER_BASE_URL=http://localhost:8000 -e TOTAL_REQUESTS=1000000 -e VUS=2000 -e MAX_DURATION=20m -e UNIQUE_USERS=1000 -e TARGET_ITEM=notebook -e ITEM_QUANTITY=5
 ```
 
 Terminal 3: simulate outage while load is active

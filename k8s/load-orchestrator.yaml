@@ -137,6 +137,14 @@ spec:
           env:
             - name: TARGET_NAMESPACE
               value: kafka-lab
+            - name: K6_CPU_REQUEST
+              value: "250m"
+            - name: K6_CPU_LIMIT
+              value: "1000m"
+            - name: K6_MEMORY_REQUEST
+              value: "256Mi"
+            - name: K6_MEMORY_LIMIT
+              value: "1Gi"
           resources:
             requests:
               cpu: "2000m"

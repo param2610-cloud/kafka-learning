@@ -29,7 +29,7 @@ services:
       KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "1"
       KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
       KAFKA_CFG_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
-      KAFKA_CFG_NUM_PARTITIONS: "3"
+      KAFKA_CFG_NUM_PARTITIONS: "16"
       ALLOW_PLAINTEXT_LISTENER: "yes"
     healthcheck:
       test: ["CMD-SHELL", "/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list > /dev/null 2>&1"]
@@ -37,6 +37,31 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+
+  kafka-init:
+    image: bitnami/kafka:3.7
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      /bin/sh -c "
+      TOPIC=orders.created;
+      TARGET_PARTITIONS=16;
+      BS=kafka:9092;
+      /opt/bitnami/kafka/bin/kafka-topics.sh
+      --bootstrap-server $${BS}
+      --create
+      --if-not-exists
+      --topic $${TOPIC}
+      --partitions $${TARGET_PARTITIONS}
+      --replication-factor 1;
+      CURRENT_PARTITIONS=$$(/opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server $${BS} --describe --topic $${TOPIC} | grep -o 'PartitionCount: [0-9]*' | head -n1 | awk '{print $$2}');
+      if [ -n $${CURRENT_PARTITIONS} ] && [ $${CURRENT_PARTITIONS} -lt $${TARGET_PARTITIONS} ]; then
+      /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server $${BS} --alter --topic $${TOPIC} --partitions $${TARGET_PARTITIONS};
+      fi
+      "
+    restart: "no"
 
   email-service:
     build:
@@ -79,11 +104,14 @@ services:
       - "8002:8002"
 
   order-service:
-    bucontext: ./order-service
+    build:
+      context: ./order-service
     container_name: order-service
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       email-service:

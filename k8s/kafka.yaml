@@ -48,7 +48,7 @@ spec:
             - name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
               value: "0"
             - name: KAFKA_NUM_PARTITIONS
-              value: "3"
+              value: "16"
           resources:
             requests:
               cpu: "300m"
@@ -79,3 +79,49 @@ spec:
     - name: kafka
       port: 9092
       targetPort: 9092
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-topic-init
+  namespace: kafka-lab
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kafka-topic-init
+          image: apache/kafka:3.7.0
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              TOPIC="orders.created"
+              TARGET_PARTITIONS=16
+              BS="kafka:9092"
+
+              /opt/kafka/bin/kafka-topics.sh \
+                --bootstrap-server ${BS} \
+                --create \
+                --if-not-exists \
+                --topic ${TOPIC} \
+                --partitions ${TARGET_PARTITIONS} \
+                --replication-factor 1
+
+              CURRENT_PARTITIONS=$(
+                /opt/kafka/bin/kafka-topics.sh \
+                  --bootstrap-server ${BS} \
+                  --describe \
+                  --topic ${TOPIC} | grep -m1 "PartitionCount:" | sed -E 's/.*PartitionCount:([0-9]+).*/\1/'
+              )
+
+              if [ -n "${CURRENT_PARTITIONS}" ] && [ "${CURRENT_PARTITIONS}" -lt "${TARGET_PARTITIONS}" ]; then
+                /opt/kafka/bin/kafka-topics.sh \
+                  --bootstrap-server ${BS} \
+                  --alter \
+                  --topic ${TOPIC} \
+                  --partitions ${TARGET_PARTITIONS}
+              fi

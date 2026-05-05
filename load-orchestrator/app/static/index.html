@@ -1,355 +1,787 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Load Orchestrator</title>
-    <style>
-      :root {
-        --bg: #0b1020;
-        --bg2: #131a33;
-        --card: #18213f;
-        --text: #e8ecff;
-        --muted: #a9b2d6;
-        --accent: #4dd0e1;
-        --danger: #ff7a7a;
-        --ok: #6ee7a2;
-      }
-      * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        background: radial-gradient(circle at 20% 0%, #202d5a 0%, var(--bg) 55%);
-        color: var(--text);
-      }
-      .wrap {
-        max-width: 1100px;
-        margin: 0 auto;
-        padding: 24px;
-      }
-      h1 { margin: 0 0 10px; }
-      p { color: var(--muted); }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 12px;
-      }
-      .card {
-        background: linear-gradient(180deg, var(--card), var(--bg2));
-        border: 1px solid #2f3b66;
-        border-radius: 12px;
-        padding: 14px;
-      }
-      label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
-      input, select {
-        width: 100%;
-        border-radius: 8px;
-        border: 1px solid #3a4978;
-        background: #0e1630;
-        color: var(--text);
-        padding: 10px;
-      }
-      .actions { display: flex; gap: 10px; margin-top: 14px; }
-      button {
-        border: none;
-        border-radius: 8px;
-        padding: 10px 14px;
-        color: #04101b;
-        background: var(--accent);
-        cursor: pointer;
-        font-weight: 600;
-      }
-      button.secondary { background: #7183c5; color: #fff; }
-      .run-list { margin-top: 18px; }
-      .run-item { margin-bottom: 12px; }
-      .status-running { color: var(--accent); }
-      .status-succeeded { color: var(--ok); }
-      .status-failed, .status-stopped { color: var(--danger); }
-      pre {
-        max-height: 220px;
-        overflow: auto;
-        white-space: pre-wrap;
-        background: #0a122a;
-        border: 1px solid #2c3a64;
-        border-radius: 8px;
-        padding: 10px;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <h1>Cluster Load Orchestrator</h1>
-      <p>Run in-cluster load tests against Order Service and optionally inject outage chaos.</p>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Load Orchestrator — Cluster Control</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-      <!-- Stock Management Section -->
+    :root {
+      --bg:       #0d0f14;
+      --surface:  #13161f;
+      --panel:    #181d29;
+      --border:   rgba(255,255,255,0.07);
+      --border-hi:rgba(255,255,255,0.14);
+      --text:     #e2e6f0;
+      --muted:    #6b7699;
+      --subtle:   #343c57;
+      --teal:     #00c9b1;
+      --teal-dim: rgba(0,201,177,0.12);
+      --amber:    #f5a623;
+      --amber-dim:rgba(245,166,35,0.12);
+      --red:      #f05a5a;
+      --red-dim:  rgba(240,90,90,0.12);
+      --green:    #4ed89a;
+      --green-dim:rgba(78,216,154,0.12);
+      --blue:     #5b9cf6;
+      --radius-sm: 6px;
+      --radius:    10px;
+      --radius-lg: 14px;
+      --mono: "IBM Plex Mono", monospace;
+      --sans: "IBM Plex Sans", sans-serif;
+    }
+
+    html { font-size: 14px; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    /* ── TOPBAR ── */
+    .topbar {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(13,15,20,0.92);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 28px; height: 56px;
+    }
+    .topbar-brand {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .brand-icon {
+      width: 28px; height: 28px; border-radius: 7px;
+      background: linear-gradient(135deg, var(--teal) 0%, #0098a6 100%);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .brand-icon svg { width: 14px; height: 14px; }
+    .brand-name {
+      font-family: var(--mono);
+      font-size: 13px; font-weight: 600;
+      letter-spacing: 0.04em; color: var(--text);
+    }
+    .brand-sub {
+      font-size: 11px; color: var(--muted);
+      font-family: var(--mono); margin-left: 2px;
+    }
+    .topbar-status {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; font-family: var(--mono); color: var(--muted);
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 2.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .dot.amber { background: var(--amber); }
+    .dot.red { background: var(--red); animation: none; }
+
+    /* ── LAYOUT ── */
+    .layout {
+      display: grid;
+      grid-template-columns: 240px 1fr;
+      min-height: calc(100vh - 56px);
+    }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      border-right: 1px solid var(--border);
+      padding: 20px 0;
+      background: var(--surface);
+    }
+    .nav-section {
+      padding: 0 14px; margin-bottom: 6px;
+    }
+    .nav-label {
+      font-size: 10px; font-family: var(--mono);
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--muted); padding: 0 10px; margin-bottom: 6px;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 9px;
+      padding: 8px 10px; border-radius: var(--radius-sm);
+      font-size: 13px; color: var(--muted); cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+    .nav-item.active { background: var(--teal-dim); color: var(--teal); }
+    .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+    .nav-divider { height: 1px; background: var(--border); margin: 10px 14px; }
+
+    /* ── MAIN ── */
+    .main { padding: 28px 32px; overflow-y: auto; }
+    .page-header { margin-bottom: 28px; }
+    .page-title { font-size: 20px; font-weight: 500; color: var(--text); margin-bottom: 4px; }
+    .page-desc { font-size: 13px; color: var(--muted); }
+
+    /* ── SECTION TABS ── */
+    .tabs { display: flex; gap: 4px; margin-bottom: 24px; }
+    .tab {
+      padding: 7px 16px; border-radius: var(--radius-sm);
+      font-size: 13px; font-weight: 500; cursor: pointer; border: none; outline: none;
+      background: transparent; color: var(--muted);
+      transition: all 0.15s;
+    }
+    .tab:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+    .tab.active { background: var(--teal-dim); color: var(--teal); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── CARDS ── */
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 22px 24px;
+      margin-bottom: 16px;
+    }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 18px;
+    }
+    .card-title {
+      font-size: 13px; font-weight: 600; color: var(--text);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card-title svg { width: 15px; height: 15px; color: var(--muted); }
+    .card-badge {
+      font-family: var(--mono); font-size: 11px; font-weight: 500;
+      padding: 3px 9px; border-radius: 99px;
+    }
+    .badge-teal { background: var(--teal-dim); color: var(--teal); }
+    .badge-amber { background: var(--amber-dim); color: var(--amber); }
+    .badge-red { background: var(--red-dim); color: var(--red); }
+    .badge-muted { background: rgba(255,255,255,0.05); color: var(--muted); }
+
+    /* ── STOCK METER ── */
+    .stock-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+    }
+    .stock-meter {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+    }
+    .stock-item-label {
+      font-size: 11px; font-family: var(--mono); letter-spacing: 0.05em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
+    }
+    .stock-item-value {
+      font-size: 28px; font-family: var(--mono); font-weight: 600; color: var(--text);
+      margin-bottom: 8px; line-height: 1;
+    }
+    .stock-bar-track {
+      height: 4px; background: rgba(255,255,255,0.07); border-radius: 99px; overflow: hidden;
+    }
+    .stock-bar-fill {
+      height: 100%; border-radius: 99px; background: var(--teal);
+      transition: width 0.5s ease;
+    }
+    .stock-bar-fill.low { background: var(--amber); }
+    .stock-bar-fill.empty { background: var(--red); }
+
+    /* ── FORM GRID ── */
+    .form-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px;
+    }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label {
+      font-size: 11px; font-family: var(--mono); letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .field input, .field select {
+      background: var(--surface); border: 1px solid var(--border-hi);
+      color: var(--text); border-radius: var(--radius-sm);
+      padding: 9px 12px; font-family: var(--mono); font-size: 13px;
+      outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+      appearance: none; -webkit-appearance: none;
+    }
+    .field input:focus, .field select:focus {
+      border-color: var(--teal); box-shadow: 0 0 0 3px rgba(0,201,177,0.1);
+    }
+    .field input::placeholder { color: var(--muted); }
+    .field select option { background: #1a2035; }
+    .field-full { grid-column: 1 / -1; }
+
+    /* ── SECTION DIVIDER ── */
+    .section-sep {
+      height: 1px; background: var(--border); margin: 20px 0;
+    }
+    .section-sub-label {
+      font-size: 11px; font-family: var(--mono); letter-spacing: 0.10em;
+      text-transform: uppercase; color: var(--subtle); margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-sub-label::after {
+      content: ''; flex: 1; height: 1px; background: var(--border);
+    }
+
+    /* ── BUTTONS ── */
+    .btn-row { display: flex; gap: 10px; margin-top: 20px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 9px 18px; border-radius: var(--radius-sm); border: none;
+      font-family: var(--sans); font-size: 13px; font-weight: 500; cursor: pointer;
+      transition: all 0.15s; text-decoration: none;
+    }
+    .btn svg { width: 14px; height: 14px; }
+    .btn-primary {
+      background: var(--teal); color: #05151200;
+      color: #03211c;
+    }
+    .btn-primary:hover { background: #00e0c7; transform: translateY(-1px); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-secondary {
+      background: rgba(255,255,255,0.07); color: var(--text);
+      border: 1px solid var(--border-hi);
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.11); }
+    .btn-danger {
+      background: var(--red-dim); color: var(--red);
+      border: 1px solid rgba(240,90,90,0.2);
+    }
+    .btn-danger:hover { background: rgba(240,90,90,0.2); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+
+    /* ── RUN CARDS ── */
+    .runs-empty {
+      text-align: center; padding: 48px 0;
+      color: var(--muted); font-size: 13px;
+    }
+    .runs-empty svg { width: 36px; height: 36px; margin-bottom: 12px; opacity: 0.3; }
+    .run-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 18px 20px; margin-bottom: 12px;
+      transition: border-color 0.2s;
+    }
+    .run-card:hover { border-color: var(--border-hi); }
+    .run-card-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
+    }
+    .run-card-title {
+      font-family: var(--mono); font-size: 13px; font-weight: 500; color: var(--text);
+    }
+    .run-card-id {
+      font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 2px;
+    }
+    .run-meta {
+      display: flex; gap: 18px; margin-bottom: 14px;
+    }
+    .run-meta-item { display: flex; flex-direction: column; gap: 2px; }
+    .run-meta-label { font-size: 10px; font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+    .run-meta-value { font-size: 14px; font-family: var(--mono); font-weight: 500; color: var(--text); }
+    .run-log {
+      font-family: var(--mono); font-size: 11px; color: #8597c4;
+      background: #0a0d14; border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 10px 12px;
+      max-height: 160px; overflow-y: auto; white-space: pre-wrap; line-height: 1.7;
+    }
+    .run-log::-webkit-scrollbar { width: 5px; }
+    .run-log::-webkit-scrollbar-track { background: transparent; }
+    .run-log::-webkit-scrollbar-thumb { background: var(--subtle); border-radius: 99px; }
+
+    /* ── STATUS CHIP ── */
+    .chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; font-family: var(--mono); font-weight: 500;
+      padding: 3px 9px; border-radius: 99px;
+    }
+    .chip-running   { background: rgba(91,156,246,0.15); color: var(--blue); }
+    .chip-succeeded { background: var(--green-dim); color: var(--green); }
+    .chip-failed    { background: var(--red-dim); color: var(--red); }
+    .chip-stopped   { background: rgba(255,255,255,0.07); color: var(--muted); }
+    .chip-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+    .chip-running .chip-dot { animation: pulse 1.6s ease-in-out infinite; }
+
+    /* ── TOAST ── */
+    .toast-wrap {
+      position: fixed; bottom: 24px; right: 24px; z-index: 999;
+      display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+    }
+    .toast {
+      background: var(--panel); border: 1px solid var(--border-hi);
+      border-radius: var(--radius); padding: 12px 16px;
+      font-size: 13px; display: flex; align-items: center; gap: 10px;
+      pointer-events: all; opacity: 0; transform: translateY(8px);
+      transition: all 0.3s; min-width: 260px;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.toast-ok { border-left: 3px solid var(--green); }
+    .toast.toast-err { border-left: 3px solid var(--red); }
+    .toast.toast-info { border-left: 3px solid var(--teal); }
+    .toast-icon { flex-shrink: 0; font-size: 15px; }
+
+    /* ── SCROLLBAR ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--subtle); border-radius: 99px; }
+
+    /* ── ANIMATIONS ── */
+    @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+    .card { animation: fadeIn 0.25s ease both; }
+  </style>
+</head>
+<body>
+
+<!-- Topbar -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <div class="brand-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/>
+      </svg>
+    </div>
+    <div>
+      <div class="brand-name">LOAD ORCHESTRATOR</div>
+      <div class="brand-sub">cluster control plane</div>
+    </div>
+  </div>
+  <div class="topbar-status">
+    <div class="dot" id="sys-dot"></div>
+    <span id="sys-label">Cluster online</span>
+  </div>
+</header>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="nav-section">
+      <div class="nav-label">Control</div>
+      <div class="nav-item active" onclick="switchTab('stock')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Stock Management
+      </div>
+      <div class="nav-item" onclick="switchTab('load')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Load Test
+      </div>
+      <div class="nav-item" onclick="switchTab('special')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        Special Order
+      </div>
+    </div>
+    <div class="nav-divider"></div>
+    <div class="nav-section">
+      <div class="nav-label">Observability</div>
+      <div class="nav-item" onclick="switchTab('runs')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        Run History
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- STOCK TAB -->
+    <div class="tab-panel active" id="tab-stock">
+      <div class="page-header">
+        <div class="page-title">Stock Management</div>
+        <div class="page-desc">View current inventory levels and initialize stock before running load tests.</div>
+      </div>
+
       <div class="card">
-        <h2>Stock Management</h2>
-        <p>View and initialize stock before running load tests.</p>
-        <div id="stock_display" style="margin-bottom: 15px; padding: 10px; background: #0e1630; border-radius: 8px;">
-          <p>Loading stock...</p>
+        <div class="card-header">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20.91 8.84 8.56 2.23a1 1 0 0 0-.94 0L3.1 4.13a1 1 0 0 0 0 1.75l13 6.57a1 1 0 0 0 .94 0l4-2a1 1 0 0 0-.13-1.61z"/><path d="m3.09 8.84 13 6.57a1 1 0 0 0 .94 0l4-2"/><path d="M12 22V12"/></svg>
+            Inventory Snapshot
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="refreshStock()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.5 2v6h-6M2.5 22v-6h6"/><path d="M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>
+            Refresh
+          </button>
         </div>
-        <div class="grid">
-          <div>
-            <label>Pencil Stock</label>
-            <input id="stock_pencil" type="number" value="100" min="1" />
+
+        <div class="stock-grid" id="stock_display">
+          <div class="stock-meter">
+            <div class="stock-item-label">Pencil</div>
+            <div class="stock-item-value" id="v-pencil">—</div>
+            <div class="stock-bar-track"><div class="stock-bar-fill" id="b-pencil" style="width:0%"></div></div>
           </div>
-          <div>
-            <label>Notebook Stock</label>
-            <input id="stock_notebook" type="number" value="50" min="1" />
+          <div class="stock-meter">
+            <div class="stock-item-label">Notebook</div>
+            <div class="stock-item-value" id="v-notebook">—</div>
+            <div class="stock-bar-track"><div class="stock-bar-fill" id="b-notebook" style="width:0%"></div></div>
           </div>
-          <div>
-            <label>Eraser Stock</label>
-            <input id="stock_eraser" type="number" value="75" min="1" />
+          <div class="stock-meter">
+            <div class="stock-item-label">Eraser</div>
+            <div class="stock-item-value" id="v-eraser">—</div>
+            <div class="stock-bar-track"><div class="stock-bar-fill" id="b-eraser" style="width:0%"></div></div>
           </div>
-        </div>
-        <div class="actions">
-          <button onclick="refreshStock()">Refresh Stock</button>
-          <button class="secondary" onclick="setStock()">Initialize Stock</button>
         </div>
       </div>
 
       <div class="card">
-        <h2>Load Test Configuration</h2>
-        <p>Configure and run load tests against Order Service.</p>
-          <div>
+        <div class="card-header">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+            Initialize Stock
+          </div>
+          <span class="card-badge badge-amber">Write Operation</span>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Pencil Stock</label>
+            <input id="stock_pencil" type="number" value="100" min="1" placeholder="100" />
+          </div>
+          <div class="field">
+            <label>Notebook Stock</label>
+            <input id="stock_notebook" type="number" value="50" min="1" placeholder="50" />
+          </div>
+          <div class="field">
+            <label>Eraser Stock</label>
+            <input id="stock_eraser" type="number" value="75" min="1" placeholder="75" />
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="setStock()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Initialize Stock
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- LOAD TAB -->
+    <div class="tab-panel" id="tab-load">
+      <div class="page-header">
+        <div class="page-title">Load Test Configuration</div>
+        <div class="page-desc">Configure virtual users, request volume, and optional chaos injection.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Test Parameters
+          </div>
+          <span class="card-badge badge-teal">k6 Runner</span>
+        </div>
+        <div class="form-grid">
+          <div class="field">
             <label>Total Requests</label>
             <input id="total_requests" type="number" value="2000" min="1" />
           </div>
-          <div>
-            <label>VUs</label>
+          <div class="field">
+            <label>Virtual Users (VUs)</label>
             <input id="vus" type="number" value="100" min="1" />
           </div>
-          <div>
+          <div class="field">
             <label>Max Duration</label>
-            <input id="max_duration" type="text" value="2m" />
+            <input id="max_duration" type="text" value="2m" placeholder="e.g. 2m, 30s" />
           </div>
-          <div>
+          <div class="field">
             <label>Unique Users</label>
             <input id="unique_users" type="number" value="1000" min="1" />
           </div>
-          <div>
-            <label>Order Base URL</label>
-            <input id="order_base_url" type="text" value="http://order-service.kafka-lab.svc.cluster.local:8000" />
-          </div>
-          <div>
-            <label>Chaos Enabled</label>
-            <select id="chaos_enabled">
-              <option value="false" selected>false</option>
-              <option value="true">true</option>
+          <div class="field">
+            <label>Target Item</label>
+            <select id="target_item">
+              <option value="pencil">pencil</option>
+              <option value="notebook">notebook</option>
+              <option value="eraser">eraser</option>
             </select>
           </div>
-          <div>
+          <div class="field">
+            <label>Item Quantity</label>
+            <input id="item_quantity" type="number" value="1" min="1" />
+          </div>
+          <div class="field field-full">
+            <label>Order Service Base URL</label>
+            <input id="order_base_url" type="text" value="http://order-service.kafka-lab.svc.cluster.local:8000" />
+          </div>
+        </div>
+
+        <div class="section-sep"></div>
+        <div class="section-sub-label">Chaos Engineering</div>
+
+        <div class="form-grid">
+          <div class="field">
+            <label>Chaos Enabled</label>
+            <select id="chaos_enabled">
+              <option value="false">Disabled</option>
+              <option value="true">Enabled</option>
+            </select>
+          </div>
+          <div class="field">
             <label>Chaos Target</label>
             <select id="target_service">
               <option value="email-service">email-service</option>
               <option value="inventory-service">inventory-service</option>
             </select>
           </div>
-          <div>
-            <label>Outage Seconds</label>
+          <div class="field">
+            <label>Outage Duration (sec)</label>
             <input id="outage_seconds" type="number" value="60" min="5" />
           </div>
-          <div>
+          <div class="field">
             <label>Recovery Replicas</label>
             <input id="recovery_replicas" type="number" value="2" min="1" />
           </div>
         </div>
-        <div class="actions">
-          <button onclick="startRun()">Start Run</button>
-          <button class="secondary" onclick="refreshRuns()">Refresh</button>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="startRun()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Start Load Test
+          </button>
+          <button class="btn btn-secondary" onclick="switchTab('runs')">
+            View Run History
+          </button>
         </div>
       </div>
-
-      <!-- Special Order Trigger Section -->
-      <div class="card">
-        <h2>Special Order Trigger (Simulate Buy Button)</h2>
-        <p>Trigger a special order with SPECIAL-EMAIL-TRIGGER product to send immediate email confirmation.</p>
-        <div class="grid">
-          <div>
-            <label>User ID</label>
-            <input id="special_user_id" type="text" value="test-user" />
-          </div>
-          <div>
-            <label>Email</label>
-            <input id="special_email" type="email" value="test@example.com" />
-          </div>
-        </div>
-        <div class="actions">
-          <button onclick="triggerSpecialOrder()">Trigger Special Order</button>
-          <button class="secondary" onclick="clearSpecialForm()">Clear Form</button>
-        </div>
-      </div>
-
-      <div class="run-list" id="runs"></div>
     </div>
 
-    <script>
-      async function api(path, options = {}) {
-        const res = await fetch(`/api${path}`, {
-          headers: { "Content-Type": "application/json" },
-          ...options,
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(text || `Request failed: ${res.status}`);
-        }
-        return res.json();
+    <!-- SPECIAL ORDER TAB -->
+    <div class="tab-panel" id="tab-special">
+      <div class="page-header">
+        <div class="page-title">Special Order Trigger</div>
+        <div class="page-desc">Simulate a buy-button event with <code style="font-family:var(--mono);font-size:12px;background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;">SPECIAL-EMAIL-TRIGGER</code> to dispatch an immediate email confirmation.</div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            Trigger Parameters
+          </div>
+          <span class="card-badge badge-teal">Email Pipeline</span>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>User ID</label>
+            <input id="special_user_id" type="text" value="test-user" placeholder="user-xyz" />
+          </div>
+          <div class="field">
+            <label>Email Address</label>
+            <input id="special_email" type="email" value="test@example.com" placeholder="user@domain.com" />
+          </div>
+          <div class="field">
+            <label>Item to Order</label>
+            <select id="special_item">
+              <option value="pencil">Pencil</option>
+              <option value="notebook">Notebook</option>
+              <option value="eraser">Eraser</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Quantity</label>
+            <input id="special_quantity" type="number" value="1" min="1" max="1000" />
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="triggerSpecialOrder()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            Trigger Special Order
+          </button>
+          <button class="btn btn-secondary" onclick="clearSpecialForm()">Reset Form</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RUNS TAB -->
+    <div class="tab-panel" id="tab-runs">
+      <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <div>
+          <div class="page-title">Run History</div>
+          <div class="page-desc">Active and completed load test runs. Auto-refreshes every 8s.</div>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="refreshRuns()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.5 2v6h-6M2.5 22v-6h6"/><path d="M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/></svg>
+          Refresh
+        </button>
+      </div>
+      <div id="runs"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-wrap" id="toasts"></div>
+
+<script>
+  /* ── NAV ── */
+  function switchTab(name) {
+    document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-' + name).classList.add('active');
+    const items = document.querySelectorAll('.nav-item');
+    const map = { stock: 0, load: 1, special: 2, runs: 3 };
+    if (map[name] !== undefined) items[map[name]].classList.add('active');
+    if (name === 'runs') refreshRuns();
+  }
+
+  /* ── TOAST ── */
+  function toast(msg, type = 'info') {
+    const wrap = document.getElementById('toasts');
+    const icons = { ok: '✓', err: '✕', info: 'i' };
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.innerHTML = `<span class="toast-icon">${icons[type]||'i'}</span><span>${msg}</span>`;
+    wrap.appendChild(el);
+    requestAnimationFrame(() => { requestAnimationFrame(() => el.classList.add('show')); });
+    setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 350); }, 3500);
+  }
+
+  /* ── API ── */
+  async function api(path, options = {}) {
+    const res = await fetch(`/api${path}`, {
+      headers: { "Content-Type": "application/json" }, ...options,
+    });
+    if (!res.ok) { const t = await res.text(); throw new Error(t || `HTTP ${res.status}`); }
+    return res.json();
+  }
+
+  /* ── STOCK ── */
+  let stockMax = { pencil: 100, notebook: 50, eraser: 75 };
+
+  async function refreshStock() {
+    try {
+      const s = await api('/stock');
+      ['pencil','notebook','eraser'].forEach(k => {
+        const v = s[k] || 0;
+        document.getElementById('v-' + k).textContent = v;
+        const pct = Math.min(100, Math.round((v / (stockMax[k] || 100)) * 100));
+        const bar = document.getElementById('b-' + k);
+        bar.style.width = pct + '%';
+        bar.className = 'stock-bar-fill' + (pct < 20 ? ' empty' : pct < 50 ? ' low' : '');
+      });
+    } catch(err) { toast('Stock fetch failed: ' + err.message, 'err'); }
+  }
+
+  async function setStock() {
+    const p = Number(document.getElementById('stock_pencil').value);
+    const n = Number(document.getElementById('stock_notebook').value);
+    const e = Number(document.getElementById('stock_eraser').value);
+    if (p < 1 || n < 1 || e < 1) { toast('All stock values must be ≥ 1', 'err'); return; }
+    try {
+      await api('/stock', { method: 'POST', body: JSON.stringify({ pencil: p, notebook: n, eraser: e }) });
+      stockMax = { pencil: p, notebook: n, eraser: e };
+      toast('Stock initialized successfully', 'ok');
+      await refreshStock();
+    } catch(err) { toast('Initialize failed: ' + err.message, 'err'); }
+  }
+
+  /* ── LOAD TEST ── */
+  function collectPayload() {
+    return {
+      total_requests: Number(document.getElementById('total_requests').value),
+      vus: Number(document.getElementById('vus').value),
+      max_duration: document.getElementById('max_duration').value,
+      unique_users: Number(document.getElementById('unique_users').value),
+      order_base_url: document.getElementById('order_base_url').value,
+      target_item: document.getElementById('target_item').value,
+      item_quantity: Number(document.getElementById('item_quantity').value),
+      chaos: {
+        enabled: document.getElementById('chaos_enabled').value === 'true',
+        target_service: document.getElementById('target_service').value,
+        outage_seconds: Number(document.getElementById('outage_seconds').value),
+        recovery_replicas: Number(document.getElementById('recovery_replicas').value),
+      },
+    };
+  }
+
+  async function startRun() {
+    try {
+      await api('/runs', { method: 'POST', body: JSON.stringify(collectPayload()) });
+      toast('Load test started', 'ok');
+      switchTab('runs');
+    } catch(err) { toast('Failed to start run: ' + err.message, 'err'); }
+  }
+
+  async function stopRun(runId) {
+    try {
+      await api(`/runs/${runId}`, { method: 'DELETE' });
+      toast('Run stopped', 'info');
+      await refreshRuns();
+    } catch(err) { toast('Stop failed: ' + err.message, 'err'); }
+  }
+
+  /* ── RUNS ── */
+  async function refreshRuns() {
+    const runsEl = document.getElementById('runs');
+    try {
+      const data = await api('/runs');
+      const runs = (data.runs || []);
+      if (!runs.length) {
+        runsEl.innerHTML = `<div class="runs-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 17H7A5 5 0 017 7h2M15 7h2a5 5 0 010 10h-2M11 12h2"/></svg>
+          <div>No runs yet. Start a load test to see results here.</div>
+        </div>`;
+        return;
       }
+      const details = await Promise.all(runs.map(r => api(`/runs/${r.run_id}`)));
+      runsEl.innerHTML = details.map(d => {
+        const st = d.run.status;
+        const chipCls = 'chip chip-' + st;
+        const dotHtml = `<span class="chip-dot"></span>`;
+        return `<div class="run-card">
+          <div class="run-card-header">
+            <div>
+              <div class="run-card-title">${d.run.job_name}</div>
+              <div class="run-card-id">${d.run.run_id}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span class="${chipCls}">${dotHtml}${st}</span>
+              <button class="btn btn-danger btn-sm" onclick="stopRun('${d.run.run_id}')">Stop</button>
+            </div>
+          </div>
+          <div class="run-meta">
+            <div class="run-meta-item">
+              <span class="run-meta-label">Active</span>
+              <span class="run-meta-value">${d.active ?? '—'}</span>
+            </div>
+            <div class="run-meta-item">
+              <span class="run-meta-label">Succeeded</span>
+              <span class="run-meta-value" style="color:var(--green)">${d.succeeded ?? '—'}</span>
+            </div>
+            <div class="run-meta-item">
+              <span class="run-meta-label">Failed</span>
+              <span class="run-meta-value" style="color:var(--red)">${d.failed ?? '—'}</span>
+            </div>
+          </div>
+          <div class="run-log">${d.last_log_excerpt || 'No log output yet.'}</div>
+        </div>`;
+      }).join('');
+    } catch(err) {
+      runsEl.innerHTML = `<div class="runs-empty" style="color:var(--red)">Failed to load runs: ${err.message}</div>`;
+    }
+  }
 
-      async function refreshStock() {
-        const stockEl = document.getElementById("stock_display");
-        try {
-          const stock = await api("/stock");
-          const html = `
-            <p><strong>Current Stock Levels:</strong></p>
-            <ul style="margin: 10px 0; padding-left: 20px;">
-              <li>Pencil: <strong>${stock.pencil || 0}</strong></li>
-              <li>Notebook: <strong>${stock.notebook || 0}</strong></li>
-              <li>Eraser: <strong>${stock.eraser || 0}</strong></li>
-            </ul>
-            <p style="color: #6ee7a2; font-size: 12px;">✓ Stock fetched from Inventory Service</p>
-          `;
-          stockEl.innerHTML = html;
-          
-          // Update form fields with current values
-          document.getElementById("stock_pencil").value = stock.pencil || 100;
-          document.getElementById("stock_notebook").value = stock.notebook || 50;
-          document.getElementById("stock_eraser").value = stock.eraser || 75;
-        } catch (err) {
-          stockEl.innerHTML = `<p style="color: #ff7a7a;">⚠ Failed to fetch stock: ${err.message}</p>`;
-        }
-      }
+  /* ── SPECIAL ORDER ── */
+  async function triggerSpecialOrder() {
+    const userId = document.getElementById('special_user_id').value;
+    const email  = document.getElementById('special_email').value;
+    const item   = document.getElementById('special_item').value;
+    const qty    = Number(document.getElementById('special_quantity').value);
+    if (!userId || !email) { toast('User ID and email are required', 'err'); return; }
+    if (qty < 1) { toast('Quantity must be at least 1', 'err'); return; }
+    try {
+      const r = await api('/special-order', { method: 'POST', body: JSON.stringify({ user_id: userId, email, product_id: item, quantity: qty }) });
+      toast('Order triggered: ' + r.order.order_id, 'ok');
+    } catch(err) { toast('Failed: ' + err.message, 'err'); }
+  }
 
-      async function setStock() {
-        const pencil = Number(document.getElementById("stock_pencil").value);
-        const notebook = Number(document.getElementById("stock_notebook").value);
-        const eraser = Number(document.getElementById("stock_eraser").value);
-        
-        if (pencil < 1 || notebook < 1 || eraser < 1) {
-          alert("All stock values must be greater than 0");
-          return;
-        }
-        
-        try {
-          const response = await api("/stock", {
-            method: "POST",
-            body: JSON.stringify({
-              pencil: pencil,
-              notebook: notebook,
-              eraser: eraser,
-            }),
-          });
-          
-          const prev = response.previous || {};
-          const curr = response.current || {};
-          
-          alert(
-            `✓ Stock Initialized!\n\n` +
-            `Previous: pencil=${prev.pencil || 0}, notebook=${prev.notebook || 0}, eraser=${prev.eraser || 0}\n` +
-            `Current: pencil=${curr.pencil || 0}, notebook=${curr.notebook || 0}, eraser=${curr.eraser || 0}\n\n` +
-            `Message: ${response.message}`
-          );
-          await refreshStock();
-        } catch (err) {
-          alert(`Failed to set stock: ${err.message}`);
-        }
-      }
+  function clearSpecialForm() {
+    document.getElementById('special_user_id').value = 'test-user';
+    document.getElementById('special_email').value = 'test@example.com';
+    document.getElementById('special_item').value = 'pencil';
+    document.getElementById('special_quantity').value = '1';
+    toast('Form reset', 'info');
+  }
 
-      function collectPayload() {
-        return {
-          total_requests: Number(document.getElementById("total_requests").value),
-          vus: Number(document.getElementById("vus").value),
-          max_duration: document.getElementById("max_duration").value,
-          unique_users: Number(document.getElementById("unique_users").value),
-          order_base_url: document.getElementById("order_base_url").value,
-          chaos: {
-            enabled: document.getElementById("chaos_enabled").value === "true",
-            target_service: document.getElementById("target_service").value,
-            outage_seconds: Number(document.getElementById("outage_seconds").value),
-            recovery_replicas: Number(document.getElementById("recovery_replicas").value),
-          },
-        };
-      }
-
-      async function startRun() {
-        try {
-          await api("/runs", {
-            method: "POST",
-            body: JSON.stringify(collectPayload()),
-          });
-          await refreshRuns();
-        } catch (err) {
-          alert(`Failed to start run: ${err.message}`);
-        }
-      }
-
-      async function stopRun(runId) {
-        try {
-          await api(`/runs/${runId}`, { method: "DELETE" });
-          await refreshRuns();
-        } catch (err) {
-          alert(`Failed to stop run: ${err.message}`);
-        }
-      }
-
-      async function refreshRuns() {
-        const runsEl = document.getElementById("runs");
-        runsEl.innerHTML = "Loading...";
-        try {
-          const data = await api("/runs");
-          const runs = data.runs || [];
-          if (!runs.length) {
-            runsEl.innerHTML = "<p>No runs yet.</p>";
-            return;
-          }
-
-          const details = await Promise.all(runs.map((run) => api(`/runs/${run.run_id}`)));
-          runsEl.innerHTML = details
-            .map((d) => {
-              const status = d.run.status;
-              const log = d.last_log_excerpt || "No logs yet";
-              return `
-                <div class="card run-item">
-                  <h3>${d.run.job_name}</h3>
-                  <p>Run ID: ${d.run.run_id}</p>
-                  <p>Status: <span class="status-${status}">${status}</span></p>
-                  <p>Active: ${d.active}</p>
-                  <p>Succeeded: ${d.succeeded ?? "n/a"} | Failed: ${d.failed ?? "n/a"}</p>
-                  <div class="actions">
-                    <button class="secondary" onclick="stopRun('${d.run.run_id}')">Stop Run</button>
-                  </div>
-                  <pre>${log}</pre>
-                </div>
-              `;
-            })
-            .join("");
-        } catch (err) {
-          runsEl.innerHTML = `<p>Failed to load runs: ${err.message}</p>`;
-        }
-      }
-
-      async function triggerSpecialOrder() {
-        const userId = document.getElementById("special_user_id").value;
-        const email = document.getElementById("special_email").value;
-        try {
-          const response = await api("/special-order", {
-            method: "POST",
-            body: JSON.stringify({ user_id: userId, email: email }),
-          });
-          alert(`Special order triggered: ${response.order.order_id}`);
-        } catch (err) {
-          alert(`Failed to trigger special order: ${err.message}`);
-        }
-      }
-
-      function clearSpecialForm() {
-        document.getElementById("special_user_id").value = "test-user";
-        document.getElementById("special_email").value = "test@example.com";
-      }
-
-      refreshStock();
-      refreshRuns();
-      setInterval(refreshRuns, 8000);
-    </script>
-  </body>
+  /* ── INIT ── */
+  refreshStock();
+  refreshRuns();
+  setInterval(refreshRuns, 8000);
+</script>
+</body>
 </html>

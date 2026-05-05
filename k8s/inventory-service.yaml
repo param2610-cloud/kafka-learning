@@ -30,6 +30,14 @@ spec:
               value: earliest
             - name: INVENTORY_DB_CALL_DELAY_SECONDS
               value: "0.03"
+            - name: REDIS_ENABLED
+              value: "false"
+            - name: REDIS_PREFER_CACHE
+              value: "true"
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
           resources:
             requests:
               cpu: "100m"

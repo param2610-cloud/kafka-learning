@@ -15,6 +15,8 @@ INVENTORY_SERVICE_URL = "http://inventory-service:8002"
 class SpecialOrderRequest(BaseModel):
     user_id: str
     email: str
+    product_id: str = "pencil"
+    quantity: int = 1
 
 
 class SetStockRequest(BaseModel):
@@ -115,14 +117,14 @@ def stop_run(run_id: str) -> StopRunResponse:
 
 @router.post("/special-order")
 def special_order(payload: SpecialOrderRequest):
-    """Trigger a special order with hardcoded SPECIAL-EMAIL-TRIGGER product to send immediate email confirmation."""
+    """Trigger a special order with specified product and quantity."""
     import httpx
 
     order_payload = {
         "user_id": payload.user_id,
         "email": payload.email,
         "items": [
-            {"product_id": "SPECIAL-EMAIL-TRIGGER", "quantity": 1}
+            {"product_id": payload.product_id, "quantity": payload.quantity}
         ]
     }
 

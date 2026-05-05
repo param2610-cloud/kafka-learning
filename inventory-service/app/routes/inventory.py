@@ -4,17 +4,16 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from app.models.schemas import (
-    FailureModeStatus,
-    FailureModeUpdate,
     ReduceStockRequest,
     ReduceStockResponse,
+    CheckStockAvailabilityRequest,
+    CheckStockAvailabilityResponse,
 )
 from app.services.inventory_service import (
-    get_failure_mode,
     get_stock,
     reduce_stock,
-    update_failure_mode,
     initialize_stock,
+    check_stock_availability,
 )
 from app.config.feature_flags import get_feature_flags, update_feature_flags, FeatureFlags
 
@@ -37,6 +36,12 @@ def reduce_stock_endpoint(payload: ReduceStockRequest) -> ReduceStockResponse:
     return reduce_stock(payload)
 
 
+@router.post("/check-availability", response_model=CheckStockAvailabilityResponse)
+def check_availability_endpoint(payload: CheckStockAvailabilityRequest) -> CheckStockAvailabilityResponse:
+    """Check if items are in stock before order creation"""
+    return check_stock_availability(payload)
+
+
 @router.get("/stock")
 def get_stock_endpoint() -> dict[str, int]:
     return get_stock()
@@ -51,16 +56,6 @@ def set_stock_endpoint(payload: SetStockRequest) -> dict[str, int]:
         "eraser": payload.eraser,
     }
     return initialize_stock(stock_data)
-
-
-@router.get("/failure-mode", response_model=FailureModeStatus)
-def get_failure_mode_endpoint() -> FailureModeStatus:
-    return get_failure_mode()
-
-
-@router.post("/failure-mode", response_model=FailureModeStatus)
-def update_failure_mode_endpoint(payload: FailureModeUpdate) -> FailureModeStatus:
-    return update_failure_mode(payload)
 
 
 @router.get("/feature-flags", response_model=FeatureFlagsResponse)

@@ -1,5 +1,3 @@
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 
@@ -27,12 +25,13 @@ class ReduceStockResponse(BaseModel):
     results: list[ReduceStockResult]
 
 
-class FailureModeUpdate(BaseModel):
-    enabled: bool = False
-    mode: Literal["error", "delay"] = "error"
-    error_rate: float = Field(1.0, ge=0.0, le=1.0)
-    delay_seconds: float = Field(0.0, ge=0.0, le=30.0)
+class CheckStockAvailabilityRequest(BaseModel):
+    items: list[OrderItem] = Field(..., min_length=1)
 
 
-class FailureModeStatus(FailureModeUpdate):
-    service: str
+class CheckStockAvailabilityResponse(BaseModel):
+    available: bool
+    message: str
+    details: list[dict] = Field(default_factory=list)
+
+

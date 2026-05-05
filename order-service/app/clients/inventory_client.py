@@ -17,6 +17,17 @@ def _timeout_seconds() -> float:
     return value if value > 0 else 2.0
 
 
+def check_stock_availability(items: list[dict]) -> dict:
+    """Check if items are in stock before creating order"""
+    url = f"{INVENTORY_SERVICE_URL}/check-availability"
+    payload = {"items": items}
+
+    with httpx.Client(timeout=_timeout_seconds()) as client:
+        response = client.post(url, json=payload)
+        response.raise_for_status()
+        return response.json()
+
+
 def reduce_stock(order_id: str, items: list[dict]) -> DownstreamResult:
     url = f"{INVENTORY_SERVICE_URL}/reduce-stock"
     payload = {"order_id": order_id, "items": items}

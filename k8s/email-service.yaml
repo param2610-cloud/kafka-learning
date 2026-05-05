@@ -32,6 +32,14 @@ spec:
               value: "0.12"
             - name: RESEND_API_KEY
               value: "re_TtXmVUJb_EJiDBZkqjq7RLrBTiNSRdNom"
+            - name: REDIS_ENABLED
+              value: "false"
+            - name: REDIS_PREFER_CACHE
+              value: "true"
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: "6379"
           resources:
             requests:
               cpu: "100m"
